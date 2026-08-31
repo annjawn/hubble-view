@@ -1,0 +1,14 @@
+import { ArrowUpRight, Clock3, RefreshCw } from 'lucide-react'
+import { useOverview, useScan } from '../hooks/useMetrics'
+import { compactNumber } from '../lib/format'
+import { ProviderMark } from '../components/common/ProviderMark'
+
+export function TrayView() {
+  const { data } = useOverview(7); const scan=useScan()
+  return <div className="min-h-screen bg-[#0d1015] p-4"><div className="drag-region flex items-center justify-between pb-4"><div><div className="text-sm font-semibold">Hubble</div><div className="mt-0.5 text-[11px] text-zinc-600">Local usage now</div></div><button className="no-drag grid h-8 w-8 place-items-center rounded-lg hover:bg-white/[0.06]" onClick={()=>scan.mutate()}><RefreshCw size={14} className={scan.isPending?'animate-spin text-indigo-400':'text-zinc-500'}/></button></div>
+    <div className="rounded-xl border border-white/[0.07] bg-gradient-to-br from-indigo-500/15 to-transparent p-4"><div className="label">7-day usage</div><div className="mt-2 text-3xl font-semibold">{compactNumber(data?.totals.total_tokens ?? 0)}</div><div className="mt-1 text-xs text-zinc-500">tokens across {data?.totals.sessions ?? 0} sessions</div></div>
+    <div className="mt-3 space-y-2">{['claude','codex'].map(id=>{const item=data?.providers.find(p=>p.provider===id);return <div key={id} className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.025] p-3"><ProviderMark provider={id} size="sm"/><div className="min-w-0 flex-1"><div className="flex justify-between text-xs"><span className="font-medium">{id==='claude'?'Claude Code':'Codex'}</span><span>{compactNumber(item?.tokens ?? 0)}</span></div><div className="mt-1 truncate text-[10px] text-zinc-600">{item?.model ?? 'No active model'}</div></div></div>})}</div>
+    <div className="mt-3 rounded-xl border border-white/[0.06] p-3"><div className="mb-3 flex items-center gap-2 text-xs font-medium"><Clock3 size={13} className="text-zinc-500"/>Usage windows</div>{data?.windows.map(item=><div className="mb-2 last:mb-0" key={item.label}><div className="flex items-center justify-between text-[11px]"><span className="text-zinc-500">{item.label}</span><span>{compactNumber(item.tokens)} tokens</span></div><div className="mt-0.5 text-right text-[9px] text-zinc-700">resets {new Date(item.resets_at).toLocaleString([], {weekday:'short',hour:'numeric',minute:'2-digit'})}</div></div>)}</div>
+    <button onClick={()=>window.desktop?.showMainWindow()} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-500 py-2.5 text-xs font-semibold text-white hover:bg-indigo-400">Open dashboard <ArrowUpRight size={13}/></button>
+  </div>
+}
