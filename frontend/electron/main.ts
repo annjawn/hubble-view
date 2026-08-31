@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 
 const API_PORT = 8765
@@ -17,13 +18,22 @@ function appIcon() {
 
 function startBackend() {
   const dataDir = app.getPath('userData')
-  const backendDir = path.resolve(process.cwd(), '../backend')
-  backend = spawn('uv', [
+  const backendDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'backend')
+    : path.resolve(process.cwd(), '../backend')
+  const uvExecutable = process.env.HUBBLE_UV_PATH
+    ?? ['/opt/homebrew/bin/uv', '/usr/local/bin/uv'].find(existsSync)
+    ?? 'uv'
+  backend = spawn(uvExecutable, [
     'run', '--project', backendDir,
     'uvicorn', 'harness_metrics.main:app', '--host', '127.0.0.1', '--port', String(API_PORT),
   ], {
     cwd: backendDir,
-    env: { ...process.env, HARNESS_METRICS_DATA_DIR: dataDir },
+    env: {
+      ...process.env,
+      HARNESS_METRICS_DATA_DIR: dataDir,
+      UV_PROJECT_ENVIRONMENT: path.join(dataDir, 'backend-venv'),
+    },
     stdio: 'inherit',
   })
   backend.on('error', (error) => console.error('Unable to start backend:', error))

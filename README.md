@@ -46,6 +46,19 @@ npm run backend:dev
 npm run dev:renderer
 ```
 
+## macOS installer
+
+Build a local DMG from `frontend/`:
+
+```bash
+cd frontend
+npm run dist:mac
+```
+
+Open the generated file under `frontend/release/`, then drag Hubble into the Applications folder. This development installer embeds the backend source but expects `uv` to be installed at `/opt/homebrew/bin/uv`, `/usr/local/bin/uv`, or available on `PATH`. You can override its location with `HUBBLE_UV_PATH`.
+
+Public distribution additionally requires an Apple Developer ID certificate and notarization.
+
 ## Verification
 
 ```bash
