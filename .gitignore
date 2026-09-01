@@ -10,6 +10,8 @@ frontend/electron.vite.config.js
 frontend/electron.vite.config.d.ts
 frontend/electron/*.js
 frontend/electron/*.d.ts
+frontend/backend-dist/
+frontend/.backend-build/
 .venv/
 __pycache__/
 *.py[cod]

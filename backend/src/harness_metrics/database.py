@@ -47,6 +47,101 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             connection.executescript(SCHEMA)
+            migration = connection.execute(
+                "SELECT value FROM app_settings WHERE key = 'project_path_normalization_v1'"
+            ).fetchone()
+            if migration is None:
+                connection.execute("DELETE FROM scanned_files WHERE provider = 'claude'")
+                connection.execute(
+                    """INSERT INTO app_settings(key, value)
+                    VALUES ('project_path_normalization_v1', 'true')
+                    ON CONFLICT(key) DO NOTHING"""
+                )
+            root_migration = connection.execute(
+                "SELECT value FROM app_settings WHERE key = 'project_root_normalization_v1'"
+            ).fetchone()
+            if root_migration is None:
+                connection.execute("DELETE FROM scanned_files")
+                connection.execute(
+                    """INSERT INTO app_settings(key, value)
+                    VALUES ('project_root_normalization_v1', 'true')
+                    ON CONFLICT(key) DO NOTHING"""
+                )
+            model_migration = connection.execute(
+                "SELECT value FROM app_settings WHERE key = 'codex_model_context_v1'"
+            ).fetchone()
+            if model_migration is None:
+                connection.execute("DELETE FROM scanned_files WHERE provider = 'codex'")
+                connection.execute(
+                    """INSERT INTO app_settings(key, value)
+                    VALUES ('codex_model_context_v1', 'true')
+                    ON CONFLICT(key) DO NOTHING"""
+                )
+            accounting_migration = connection.execute(
+                "SELECT value FROM app_settings WHERE key = 'normalized_token_accounting_v1'"
+            ).fetchone()
+            if accounting_migration is None:
+                connection.execute("DELETE FROM scanned_files")
+                connection.execute(
+                    """INSERT INTO app_settings(key, value)
+                    VALUES ('normalized_token_accounting_v1', 'true')
+                    ON CONFLICT(key) DO NOTHING"""
+                )
+            kiro_usage_migration = connection.execute(
+                "SELECT value FROM app_settings WHERE key = 'kiro_usage_estimator_v1'"
+            ).fetchone()
+            if kiro_usage_migration is None:
+                connection.execute("DELETE FROM usage_events WHERE provider = 'kiro'")
+                connection.execute("DELETE FROM scanned_files WHERE provider = 'kiro'")
+                connection.execute(
+                    """INSERT INTO app_settings(key, value)
+                    VALUES ('kiro_usage_estimator_v1', 'true')
+                    ON CONFLICT(key) DO NOTHING"""
+                )
+            cursor_estimate_migration = connection.execute(
+                "SELECT value FROM app_settings WHERE key = 'cursor_context_estimates_v1'"
+            ).fetchone()
+            if cursor_estimate_migration is None:
+                connection.execute("DELETE FROM usage_events WHERE provider = 'cursor'")
+                connection.execute("DELETE FROM scanned_files WHERE provider = 'cursor'")
+                connection.execute(
+                    """INSERT INTO app_settings(key, value)
+                    VALUES ('cursor_context_estimates_v1', 'true')
+                    ON CONFLICT(key) DO NOTHING"""
+                )
+            claude_request_migration = connection.execute(
+                "SELECT value FROM app_settings WHERE key = 'claude_request_dedup_v1'"
+            ).fetchone()
+            if claude_request_migration is None:
+                connection.execute("DELETE FROM usage_events WHERE provider = 'claude'")
+                connection.execute("DELETE FROM scanned_files WHERE provider = 'claude'")
+                connection.execute(
+                    """INSERT INTO app_settings(key, value)
+                    VALUES ('claude_request_dedup_v1', 'true')
+                    ON CONFLICT(key) DO NOTHING"""
+                )
+            claude_cost_migration = connection.execute(
+                "SELECT value FROM app_settings WHERE key = 'claude_api_cost_estimates_v1'"
+            ).fetchone()
+            if claude_cost_migration is None:
+                connection.execute("DELETE FROM usage_events WHERE provider = 'claude'")
+                connection.execute("DELETE FROM scanned_files WHERE provider = 'claude'")
+                connection.execute(
+                    """INSERT INTO app_settings(key, value)
+                    VALUES ('claude_api_cost_estimates_v1', 'true')
+                    ON CONFLICT(key) DO NOTHING"""
+                )
+            remove_cost_estimates = connection.execute(
+                "SELECT value FROM app_settings WHERE key = 'remove_claude_cost_estimates_v1'"
+            ).fetchone()
+            if remove_cost_estimates is None:
+                connection.execute("UPDATE usage_events SET cost_usd = 0 WHERE provider = 'claude'")
+                connection.execute("DELETE FROM scanned_files WHERE provider = 'claude'")
+                connection.execute(
+                    """INSERT INTO app_settings(key, value)
+                    VALUES ('remove_claude_cost_estimates_v1', 'true')
+                    ON CONFLICT(key) DO NOTHING"""
+                )
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -70,4 +165,3 @@ class Database:
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, json.dumps(value)),
             )
-

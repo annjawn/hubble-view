@@ -11,18 +11,21 @@
     "dev:renderer": "vite --host 127.0.0.1",
     "dev:electron": "wait-on tcp:5173 && electron-vite build --mode development && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "build": "tsc -b && vite build && electron-vite build",
-    "dist:mac": "npm run build && electron-builder --mac dmg",
+    "backend:bundle": "node scripts/build-backend.mjs",
+    "dist:mac": "npm run backend:bundle && npm run build && electron-builder --mac dmg",
+    "dist:win": "npm run backend:bundle && npm run build && electron-builder --win nsis",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run --passWithNoTests",
     "backend:dev": "uv run --project ../backend uvicorn harness_metrics.main:app --reload --host 127.0.0.1 --port 8765",
-    "backend:test": "uv run --project ../backend pytest"
+    "backend:test": "uv run --project ../backend --group dev python -m pytest ../backend/tests"
   },
   "dependencies": {
     "@tanstack/react-query": "latest",
     "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "recharts": "latest"
+    "recharts": "latest",
+    "thinking-orbs": "^0.3.1"
   },
   "devDependencies": {
     "@types/node": "latest",
@@ -52,29 +55,28 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "icons/macos/icon_1024.png",
       "package.json"
     ],
     "extraResources": [
       {
-        "from": "../backend",
-        "to": "backend",
-        "filter": [
-          "pyproject.toml",
-          "uv.lock",
-          "src/**/*"
-        ]
+        "from": "backend-dist/hubble-service",
+        "to": "backend"
       }
     ],
     "mac": {
-      "icon": "build/icons/hubble.icns",
+      "icon": "icons/macos/icon.icns",
       "category": "public.app-category.developer-tools",
       "target": [
         "dmg"
       ]
     },
+    "win": {
+      "icon": "icons/windows/icon.ico"
+    },
     "dmg": {
       "title": "Hubble ${version}",
-      "icon": "build/icons/hubble.icns",
+      "icon": "icons/macos/icon.icns",
       "contents": [
         {
           "x": 130,

@@ -28,7 +28,20 @@ def _usage(payload: dict[str, Any]) -> dict[str, Any]:
     return usage if isinstance(usage, dict) else {}
 
 
-def parse_common(path: Path, provider: str, project: str | None = None) -> Iterable[UsageEvent]:
+def _project_root(value: object) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        for candidate in (path, *path.parents):
+            if (candidate / ".git").exists():
+                return str(candidate)
+    return str(path)
+
+
+def parse_common(
+    path: Path, provider: str, project: str | None = None, model_hint: str | None = None
+) -> Iterable[UsageEvent]:
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
@@ -50,6 +63,10 @@ def parse_common(path: Path, provider: str, project: str | None = None) -> Itera
         output_tokens = _number(usage, "output_tokens", "outputTokens", "completion_tokens")
         cache_read = _number(usage, "cache_read_input_tokens", "cache_read_tokens", "cached_input_tokens")
         cache_write = _number(usage, "cache_creation_input_tokens", "cache_write_tokens")
+        # Codex includes cached input in input_tokens, while Claude reports it
+        # separately. Normalize Codex into the same non-overlapping buckets.
+        if provider == "codex" and cache_read:
+            input_tokens = max(0, input_tokens - cache_read)
         if not any((input_tokens, output_tokens, cache_read, cache_write, tool_calls)):
             continue
         timestamp = payload.get("timestamp") or payload.get("created_at") or payload.get("createdAt")
@@ -58,21 +75,33 @@ def parse_common(path: Path, provider: str, project: str | None = None) -> Itera
         if not isinstance(timestamp, str):
             timestamp = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
         message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
-        model = payload.get("model") or body.get("model") or message.get("model")
+        model = payload.get("model") or body.get("model") or message.get("model") or model_hint
+        model_name = str(model) if model else None
+        reported_cost = float(usage.get("cost_usd", 0) or 0)
         session_id = payload.get("session_id") or payload.get("sessionId") or body.get("session_id") or path.stem
-        raw_id = f"{provider}:{path}:{line_number}:{payload.get('id', '')}"
+        request_id = payload.get("requestId") or payload.get("request_id")
+        if provider == "claude" and request_id:
+            # Claude may persist the same API response several times while a
+            # streamed message is finalized. requestId is the stable API-call
+            # identity; path/line identity would count every snapshot again.
+            raw_id = f"{provider}:request:{request_id}"
+        else:
+            raw_id = f"{provider}:{path}:{line_number}:{payload.get('id', '')}"
+        project_path = _project_root(
+            payload.get("cwd") or body.get("cwd") or payload.get("project_path") or project
+        )
         yield UsageEvent(
             id=hashlib.sha256(raw_id.encode()).hexdigest(),
             provider=provider,
             occurred_at=timestamp,
             session_id=str(session_id),
-            project_path=project or payload.get("cwd") or body.get("cwd") or payload.get("project_path"),
-            model=str(model) if model else None,
+            project_path=project_path,
+            model=model_name,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cache_read_tokens=cache_read,
             cache_write_tokens=cache_write,
-            cost_usd=float(usage.get("cost_usd", 0) or 0),
+            cost_usd=reported_cost,
             duration_ms=_number(payload, "duration_ms", "durationMs"),
             tool_calls=tool_calls,
             metadata={"type": event_type},

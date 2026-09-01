@@ -31,7 +31,25 @@ class UsageScanner:
                             (id, provider, session_id, project_path, model, occurred_at,
                              input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
                              cost_usd, duration_ms, tool_calls, metadata)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT(id) DO UPDATE SET
+                            project_path = CASE
+                                WHEN excluded.project_path IS NOT NULL THEN excluded.project_path
+                                ELSE usage_events.project_path
+                            END,
+                            model = CASE
+                                WHEN excluded.model IS NOT NULL THEN excluded.model
+                                ELSE usage_events.model
+                            END,
+                            occurred_at = MAX(usage_events.occurred_at, excluded.occurred_at),
+                            input_tokens = MAX(usage_events.input_tokens, excluded.input_tokens),
+                            output_tokens = MAX(usage_events.output_tokens, excluded.output_tokens),
+                            cache_read_tokens = MAX(usage_events.cache_read_tokens, excluded.cache_read_tokens),
+                            cache_write_tokens = MAX(usage_events.cache_write_tokens, excluded.cache_write_tokens),
+                            cost_usd = excluded.cost_usd,
+                            duration_ms = excluded.duration_ms,
+                            tool_calls = excluded.tool_calls,
+                            metadata = excluded.metadata""",
                             (
                                 event.id, event.provider, event.session_id, event.project_path,
                                 event.model, event.occurred_at, event.input_tokens, event.output_tokens,
@@ -48,4 +66,3 @@ class UsageScanner:
                     )
                 counts[provider.id] = imported
         return counts
-
