@@ -1,80 +1,61 @@
-# Hubble
+<div align="center">
+  <img src="assets/hubble-logo.png" alt="Hubble" width="148" />
 
-Hubble is an offline-first desktop dashboard for monitoring local Claude Code and Codex usage. The Electron and React frontend runs alongside a local FastAPI service, which scans provider-owned logs, normalizes usage events, and stores aggregate-ready records in SQLite.
+  <h1>Hubble</h1>
 
-## Repository layout
+  <p><strong>Your personal coding agent observability dashboard.</strong></p>
 
-```text
-backend/                       Python API and metrics pipeline
-  src/harness_metrics/         API, providers, storage, and services
-  tests/                       Backend test suite
+  <p>
+    <img alt="Local first" src="https://img.shields.io/badge/local--first-private-6366f1?style=for-the-badge" />
+    <img alt="macOS" src="https://img.shields.io/badge/macOS-desktop-111827?style=for-the-badge&logo=apple&logoColor=white" />
+    <img alt="Windows" src="https://img.shields.io/badge/Windows-desktop-2563eb?style=for-the-badge&logo=windows11&logoColor=white" />
+    <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-f59e0b?style=for-the-badge" />
+  </p>
 
-frontend/                      Electron desktop app and React UI
-  electron/                    Desktop lifecycle, tray, and sidecar startup
-  src/                         Components, hooks, API client, and views
-```
+  <p>One beautiful, private view of how you build with AI.</p>
+</div>
 
-## Requirements
+---
 
-- Node.js and npm
-- Python 3.11 or newer
-- [uv](https://docs.astral.sh/uv/)
+Hubble brings the activity scattered across your coding agents into one focused desktop experience. See which tools are active, understand where your tokens are going, discover your most active projects, and follow your momentum over time—without sending your development history to another cloud.
 
-## Setup
+<div align="center">
+  <img src="assets/hubble.png" alt="Hubble dashboard showing coding-agent activity, models, and projects" width="920" />
+</div>
 
-```bash
-cd backend
-uv sync
+## Every agent. One horizon.
 
-cd ../frontend
-npm install
-```
+Your workflow is bigger than a single assistant. Hubble gives Claude Code, Codex, Cursor, Kiro, OpenCode, and Google Antigravity a shared language, turning fragmented local activity into a clear view of your work.
 
-## Development
+Move between tools as freely as you like. Hubble keeps the wider picture in sight.
 
-Start the desktop app from `frontend/`:
+## See the work behind the work
 
-```bash
-cd frontend
-npm run dev
-```
+- **A command center for your coding agents** — Scan recent activity, sessions, processed tokens, and tool usage at a glance.
+- **Model-level visibility** — Understand which models power your workflow with a horizontally browsable usage view.
+- **Project momentum** — Find your most active repositories and explore a GitHub-inspired contribution grid across the last 30 days.
+- **A timeline you can actually read** — Compare activity across harnesses with consistent colors and a unified daily trend.
+- **Quietly present** — Keep Hubble close in the system tray and open the full dashboard only when you need it.
+- **Built for focus** — A polished native desktop experience, from its animated launch to its dense, distraction-free dashboard.
 
-Electron starts the FastAPI backend automatically on `127.0.0.1:8765`. For browser-only UI development, use two terminals from `frontend/`:
+## Private by design
 
-```bash
-npm run backend:dev
-npm run dev:renderer
-```
+Hubble reads supported activity already present on your computer and keeps its normalized history in Hubble's own local database. Your usage story remains useful even as source logs change, age out, or disappear.
 
-## macOS installer
+No account. No hosted analytics service. No credentials copied into Hubble. Your coding activity stays yours.
 
-Build a local DMG from `frontend/`:
+## Understand your real workflow
 
-```bash
-cd frontend
-npm run dist:mac
-```
+Token totals alone never tell the whole story. Hubble pairs them with sessions, active projects, model mix, cache activity, tool calls, and day-by-day trends—giving you a more honest picture of how coding agents fit into your craft.
 
-Open the generated file under `frontend/release/`, then drag Hubble into the Applications folder. This development installer embeds the backend source but expects `uv` to be installed at `/opt/homebrew/bin/uv`, `/usr/local/bin/uv`, or available on `PATH`. You can override its location with `HUBBLE_UV_PATH`.
+Whether you are exploring a new model, balancing multiple subscriptions, or simply curious about where your attention goes, Hubble makes the invisible visible.
 
-Public distribution additionally requires an Apple Developer ID certificate and notarization.
+## Your work, in orbit
 
-## Verification
+Hubble is the observability layer for the way modern software gets built: many projects, many models, many agents—one personal view.
 
-```bash
-cd backend
-uv run pytest
-
-cd ../frontend
-npm run typecheck
-npm run test
-npm run build
-```
-
-## Extending providers
-
-Implement `ProviderAdapter` under `backend/src/harness_metrics/providers/`, then register the adapter in `provider_registry()`.
-
-## Privacy
-
-All normalized data remains in the operating system's application-data directory. Credentials are not copied into the application database. The current adapters report metrics available in local logs, including tokens, cache tokens, sessions, projects, models, tool calls, duration, and reported cost.
+<div align="center">
+  <strong>Stay local. See clearly. Build better.</strong>
+  <br /><br />
+  <a href="https://github.com/annjawn/hubble-view/releases">Explore Hubble releases</a>
+</div>

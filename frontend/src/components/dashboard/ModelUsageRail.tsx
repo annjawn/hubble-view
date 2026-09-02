@@ -4,6 +4,7 @@ import { ProviderMark } from '../common/ProviderMark'
 
 const providerNames: Record<string, string> = {
   claude: 'Claude Code', codex: 'Codex', cursor: 'Cursor', kiro: 'Kiro',
+  opencode: 'OpenCode', antigravity: 'Antigravity',
 }
 
 export function ModelUsageRail({ models }: { models: ModelUsage[] }) {

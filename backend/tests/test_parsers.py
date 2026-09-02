@@ -6,6 +6,8 @@ from harness_metrics.providers.jsonl import parse_common
 from harness_metrics.providers.cursor import CursorAdapter
 from harness_metrics.providers.kiro import KiroAdapter
 from harness_metrics.providers.codex import CodexAdapter
+from harness_metrics.providers.opencode import OpenCodeAdapter
+from harness_metrics.providers.antigravity import AntigravityAdapter
 
 
 def test_parses_claude_message_usage(tmp_path: Path):
@@ -143,3 +145,81 @@ def test_kiro_reads_session_metadata_and_usage_units(tmp_path: Path):
     assert event.metadata["kiro_usage_units"] == 3.5
     assert (event.cache_write_tokens, event.output_tokens) == (10, 5)
     assert event.metadata["estimator"] == "kiro-usage"
+
+
+def test_opencode_reads_per_turn_usage_and_tool_calls(tmp_path: Path):
+    database = tmp_path / "opencode.db"
+    with sqlite3.connect(database) as connection:
+        connection.executescript("""
+            CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL);
+            CREATE TABLE message (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+                time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL
+            );
+            CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, data TEXT NOT NULL);
+        """)
+        connection.execute("INSERT INTO session VALUES ('ses-1', ?)", (str(tmp_path),))
+        connection.execute("INSERT INTO message VALUES ('msg-1', 'ses-1', 1000, 2500, ?)", (json.dumps({
+            "role": "assistant", "providerID": "opencode", "modelID": "big-pickle", "cost": 0,
+            "time": {"created": 1000, "completed": 2500},
+            "tokens": {"input": 10, "output": 20, "reasoning": 5,
+                       "cache": {"read": 100, "write": 30}},
+        }),))
+        connection.executemany("INSERT INTO part VALUES (?, 'msg-1', ?)", [
+            ("part-1", json.dumps({"type": "tool"})),
+            ("part-2", json.dumps({"type": "text"})),
+        ])
+    adapter = OpenCodeAdapter()
+    adapter._database = lambda: database  # type: ignore[method-assign]
+    event = list(adapter.parse(database))[0]
+    assert (event.provider, event.model, event.session_id) == ("opencode", "big-pickle", "ses-1")
+    assert (event.input_tokens, event.output_tokens) == (10, 25)
+    assert (event.cache_read_tokens, event.cache_write_tokens) == (100, 30)
+    assert (event.tool_calls, event.duration_ms) == (1, 1500)
+    assert event.metadata["reasoning_tokens"] == 5
+
+
+def test_antigravity_decodes_generation_usage_and_project(tmp_path: Path):
+    def varint(value: int) -> bytes:
+        result = bytearray()
+        while value > 0x7f:
+            result.append((value & 0x7f) | 0x80)
+            value >>= 7
+        result.append(value)
+        return bytes(result)
+
+    def integer(field: int, value: int) -> bytes:
+        return varint(field << 3) + varint(value)
+
+    def message(field: int, value: bytes) -> bytes:
+        return varint((field << 3) | 2) + varint(len(value)) + value
+
+    usage = b"".join([
+        integer(1, 100), integer(2, 200), integer(5, 500),
+        integer(9, 50), integer(10, 25), message(11, b"response-1"),
+    ])
+    chat = message(4, usage) + message(19, b"gemini-test")
+    generation = message(1, chat)
+    started = integer(1, 1_788_306_421) + integer(2, 0)
+    ended = integer(1, 1_788_306_423) + integer(2, 0)
+    step_metadata = message(1, started) + message(8, ended)
+    workspace = message(1, f"file://{tmp_path}".encode())
+    trajectory = message(1, workspace) + message(2, started)
+
+    database = tmp_path / "conversation.db"
+    with sqlite3.connect(database) as connection:
+        connection.executescript("""
+            CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB);
+            CREATE TABLE steps (idx INTEGER PRIMARY KEY, step_type INTEGER, metadata BLOB);
+            CREATE TABLE trajectory_metadata_blob (id TEXT PRIMARY KEY, data BLOB);
+        """)
+        connection.execute("INSERT INTO gen_metadata VALUES (0, ?)", (generation,))
+        connection.execute("INSERT INTO steps VALUES (0, 15, ?)", (step_metadata,))
+        connection.execute("INSERT INTO steps VALUES (1, 132, NULL)")
+        connection.execute("INSERT INTO trajectory_metadata_blob VALUES ('main', ?)", (trajectory,))
+
+    event = list(AntigravityAdapter().parse(database))[0]
+    assert (event.provider, event.model, event.project_path) == ("antigravity", "gemini-test", str(tmp_path))
+    assert (event.input_tokens, event.output_tokens, event.cache_read_tokens) == (300, 75, 500)
+    assert (event.tool_calls, event.duration_ms) == (1, 2000)
+    assert event.metadata["reasoning_tokens"] == 25

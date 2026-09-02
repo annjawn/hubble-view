@@ -4,6 +4,7 @@ import codexLogo from '../../assets/harnesses/codex.png'
 import cursorLogo from '../../assets/harnesses/cursor.png'
 import kiroLogo from '../../assets/harnesses/kiro.png'
 import openCodeLogo from '../../assets/harnesses/open-code.png'
+import antigravityLogo from '../../assets/harnesses/antigravity.png'
 
 const logos: Record<string, string> = {
   claude: claudeCodeLogo,
@@ -13,6 +14,7 @@ const logos: Record<string, string> = {
   kiro: kiroLogo,
   'open-code': openCodeLogo,
   opencode: openCodeLogo,
+  antigravity: antigravityLogo,
 }
 
 export function ProviderMark({ provider, size = 'md' }: { provider: string; size?: 'sm' | 'md' }) {
