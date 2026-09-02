@@ -13,6 +13,8 @@
   </p>
 
   <p>One beautiful, private view of how you build with AI.</p>
+
+  <p><a href="downloads/"><strong>Download Hubble</strong></a></p>
 </div>
 
 ---
