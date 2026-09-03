@@ -10,6 +10,9 @@ from harness_metrics.providers.opencode import OpenCodeAdapter
 from harness_metrics.providers.antigravity import AntigravityAdapter
 from harness_metrics.providers.claude_trace import parse_claude_trace
 from harness_metrics.providers.codex_trace import parse_codex_trace
+from harness_metrics.providers.provider_traces import (
+    parse_cursor_trace, parse_kiro_trace, parse_opencode_trace,
+)
 
 
 def test_parses_claude_message_usage(tmp_path: Path):
@@ -86,6 +89,60 @@ def test_codex_trace_normalizes_messages_tools_and_usage(tmp_path: Path):
     assert (events[2]["kind"], events[2]["input_tokens"], events[2]["cache_read_tokens"]) == (
         "usage", 10, 100
     )
+
+
+def test_cursor_trace_normalizes_messages_and_tools(tmp_path: Path):
+    log = tmp_path / "session.jsonl"
+    log.write_text("\n".join([
+        json.dumps({"role": "user", "message": {"content": [{"type": "text", "text": "Fix it"}]}}),
+        json.dumps({"role": "assistant", "message": {"content": [
+            {"type": "text", "text": "Working"},
+            {"type": "tool_use", "name": "Read", "input": {"path": "a.py"}},
+        ]}}),
+    ]))
+    events = list(parse_cursor_trace(log, {}))
+    assert [(event["kind"], event["content"]) for event in events[:2]] == [
+        ("message", "Fix it"), ("message", "Working")
+    ]
+    assert (events[2]["kind"], events[2]["name"]) == ("tool_call", "Read")
+
+
+def test_kiro_trace_normalizes_messages_and_tool_results(tmp_path: Path):
+    session = tmp_path / "session"
+    session.mkdir()
+    (session / "session.json").write_text(json.dumps({"id": "kiro-1", "workspacePaths": [str(tmp_path)]}))
+    log = session / "messages.jsonl"
+    log.write_text("\n".join([
+        json.dumps({"id": "one", "timestamp": "2026-09-01T00:00:00Z", "payload": {"type": "user", "content": "Fix it"}}),
+        json.dumps({"id": "two", "timestamp": "2026-09-01T00:00:01Z", "payload": {"type": "tool_call", "toolCallId": "call-1", "name": "shell", "input": {"cmd": "pytest"}}}),
+        json.dumps({"id": "three", "timestamp": "2026-09-01T00:00:02Z", "payload": {"type": "tool_result", "toolCallId": "call-1", "content": "passed"}}),
+    ]))
+    events = list(parse_kiro_trace(log))
+    assert [event["kind"] for event in events] == ["message", "tool_call", "tool_result"]
+    assert events[2]["metadata"]["tool_use_id"] == "call-1"
+
+
+def test_opencode_trace_normalizes_text_reasoning_and_tools(tmp_path: Path):
+    database = tmp_path / "opencode.db"
+    connection = sqlite3.connect(database)
+    connection.executescript("""
+        CREATE TABLE session(id TEXT PRIMARY KEY, directory TEXT);
+        CREATE TABLE message(id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT);
+        CREATE TABLE part(id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT);
+    """)
+    connection.execute("INSERT INTO session VALUES ('s1', ?)", (str(tmp_path),))
+    connection.execute("INSERT INTO message VALUES ('m1','s1',1000,1000,?)", (json.dumps({"role": "assistant", "modelID": "test"}),))
+    parts = [
+        ("p1", {"type": "reasoning", "text": "Thinking"}),
+        ("p2", {"type": "text", "text": "Done"}),
+        ("p3", {"type": "tool", "tool": "bash", "callID": "c1", "state": {"status": "running", "input": {"cmd": "pytest"}}}),
+    ]
+    for index, (part_id, data) in enumerate(parts):
+        connection.execute("INSERT INTO part VALUES (?,'m1','s1',?,?,?)", (part_id, 1000 + index, 1000 + index, json.dumps(data)))
+    connection.commit(); connection.close()
+    events = list(parse_opencode_trace(database, database))
+    assert [event["kind"] for event in events] == ["thinking", "message", "tool_call"]
+    assert events[2]["name"] == "bash"
 
 
 def test_parses_codex_nested_incremental_usage(tmp_path: Path):

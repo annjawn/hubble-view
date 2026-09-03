@@ -128,6 +128,18 @@ class Database:
                     VALUES ('cursor_context_estimates_v1', 'true')
                     ON CONFLICT(key) DO NOTHING"""
                 )
+            provider_traces_migration = connection.execute(
+                "SELECT value FROM app_settings WHERE key = 'provider_traces_v1'"
+            ).fetchone()
+            if provider_traces_migration is None:
+                connection.execute(
+                    "DELETE FROM scanned_files WHERE provider IN ('cursor', 'kiro', 'opencode', 'antigravity')"
+                )
+                connection.execute(
+                    """INSERT INTO app_settings(key, value)
+                    VALUES ('provider_traces_v1', 'true')
+                    ON CONFLICT(key) DO NOTHING"""
+                )
             claude_request_migration = connection.execute(
                 "SELECT value FROM app_settings WHERE key = 'claude_request_dedup_v1'"
             ).fetchone()

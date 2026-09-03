@@ -13,5 +13,5 @@ export function App() {
   if (route === '/splash') return <SplashView />
   if (route === '/tray') return <TrayView />
   const views = { overview: <OverviewView/>, projects: <ProjectsView/>, providers: <ProvidersView/>, settings: <SettingsView/> }
-  return <div className="flex h-screen overflow-hidden"><Sidebar view={view} onChange={setView}/><main className="min-w-0 flex-1 overflow-y-auto"><div className="drag-region h-10"/><div className="mx-auto max-w-[1180px] px-8 pb-10">{views[view]}</div></main></div>
+  return <div className="flex h-screen overflow-hidden"><Sidebar view={view} onChange={setView}/><main id="app-scroll-container" className="min-w-0 flex-1 overflow-y-auto"><div className="drag-region h-10"/><div className="mx-auto max-w-[1180px] px-8 pb-10">{views[view]}</div></main></div>
 }

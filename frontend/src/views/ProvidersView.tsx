@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowDownToLine, ArrowLeft, ArrowUpFromLine, Bot, Brain, CheckCircle2, ChevronRight, CircleOff, Clock3, FileCode2, FileText, FolderSearch, Hammer, Radio, Terminal, UserRound, Wrench } from 'lucide-react'
+import { ArrowDownToLine, ArrowLeft, ArrowUp, ArrowUpFromLine, Bot, Brain, CheckCircle2, ChevronRight, CircleOff, Clock3, FileCode2, FileText, FolderSearch, Hammer, Radio, Terminal, UserRound, Wrench } from 'lucide-react'
 import { useOverview, useProviderArtifacts, useProviders, useProviderSessions, useSessionEvents } from '../hooks/useMetrics'
 import { compactNumber, relativeTime } from '../lib/format'
 import { ProviderMark } from '../components/common/ProviderMark'
@@ -28,6 +28,16 @@ function SessionDetail({ provider, sessionId, onBack }: { provider: ProviderStat
   const sessions = useProviderSessions(provider.id)
   const events = useSessionEvents(provider.id, sessionId)
   const session = sessions.data?.find(item => item.session_id === sessionId)
+  const [showScrollTop, setShowScrollTop] = useState(false)
+  useEffect(() => {
+    const scroller = document.getElementById('app-scroll-container')
+    if (!scroller) return
+    const update = () => setShowScrollTop(scroller.scrollTop > 320)
+    update()
+    scroller.addEventListener('scroll', update, { passive: true })
+    return () => scroller.removeEventListener('scroll', update)
+  }, [])
+  const scrollToTop = () => document.getElementById('app-scroll-container')?.scrollTo({ top: 0, behavior: 'smooth' })
   return <>
     <button className="mb-5 flex items-center gap-2 text-sm text-zinc-400 transition hover:text-white" onClick={onBack}><ArrowLeft size={15}/> All sessions</button>
     <div className="mb-6 flex items-start justify-between gap-5"><div className="flex min-w-0 gap-3"><ProviderMark provider={provider.id}/><div className="min-w-0"><div className="mb-1 flex items-center gap-2"><h1 className="truncate text-xl font-semibold">{projectName(session?.project_path ?? null)}</h1>{session?.status === 'live' && <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-400/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300"><Radio size={11}/> Live</span>}</div><p className="truncate font-mono text-xs text-zinc-500">{session?.project_path || session?.session_id}</p></div></div><div className="hidden items-center gap-2 text-xs text-zinc-500 sm:flex"><Clock3 size={13}/> Updated {relativeTime(session?.last_active ?? null)}</div></div>
@@ -45,6 +55,7 @@ function SessionDetail({ provider, sessionId, onBack }: { provider: ProviderStat
         </article>
       </div>
     })}</div>}
+    <button type="button" aria-label="Scroll session to top" title="Back to top" onClick={scrollToTop} className={`fixed bottom-6 right-6 z-40 grid h-11 w-11 place-items-center rounded-full border border-white/[0.1] bg-zinc-900/95 text-zinc-300 shadow-[0_12px_35px_rgba(0,0,0,0.45)] backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-400/30 hover:bg-zinc-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/70 ${showScrollTop ? 'pointer-events-auto translate-y-0 opacity-100' : 'pointer-events-none translate-y-3 opacity-0'}`}><ArrowUp size={17}/></button>
   </>
 }
 
@@ -53,6 +64,9 @@ export const artifactTabs: { id: ArtifactCategory; label: string }[] = [
   { id: 'rules', label: 'Rules' }, { id: 'hooks', label: 'Hooks' },
   { id: 'skills', label: 'Skills' }, { id: 'settings', label: 'Settings' },
 ]
+
+const providerArtifactTabs = (provider: string) =>
+  provider === 'claude' ? artifactTabs.filter(item => item.id !== 'instructions') : artifactTabs
 
 export function ArtifactBrowser({ artifacts, category }: { artifacts: ProviderArtifact[]; category: ArtifactCategory }) {
   const visible = artifacts.filter(item => item.category === category)
@@ -75,7 +89,7 @@ function ProviderDetail({ provider, onBack }: { provider: ProviderStatus; onBack
   if (selected) return <SessionDetail provider={provider} sessionId={selected} onBack={() => setSelected(null)}/>
   const artifacts = artifactQuery.data?.artifacts ?? []
   return <><button className="mb-5 flex items-center gap-2 text-sm text-zinc-400 hover:text-white" onClick={onBack}><ArrowLeft size={15}/> Providers</button><div className="mb-6 flex items-center gap-3"><ProviderMark provider={provider.id}/><div><h1 className="text-2xl font-semibold">{provider.name}</h1><p className="mt-1 text-sm text-zinc-500">Sessions and configuration from global and project scopes.</p></div></div>
-    <nav className="mb-6 flex gap-1 overflow-x-auto border-b border-white/[0.07]">{[{ id: 'sessions', label: 'Sessions' }, ...artifactTabs].map(item => { const count = item.id === 'sessions' ? sessions.data?.length : artifacts.filter(artifact => artifact.category === item.id).length; return <button key={item.id} onClick={() => setTab(item.id as 'sessions' | ArtifactCategory)} className={`relative shrink-0 px-3 py-3 text-xs font-medium transition ${tab === item.id ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>{item.label}{count !== undefined && count > 0 && <span className="ml-1.5 text-[9px] text-zinc-600">{count}</span>}{tab === item.id && <span className="absolute inset-x-2 bottom-0 h-px bg-indigo-400"/>}</button> })}</nav>
+    <nav className="mb-6 flex gap-1 overflow-x-auto border-b border-white/[0.07]">{[{ id: 'sessions', label: 'Sessions' }, ...providerArtifactTabs(provider.id)].map(item => { const count = item.id === 'sessions' ? sessions.data?.length : artifacts.filter(artifact => artifact.category === item.id).length; return <button key={item.id} onClick={() => setTab(item.id as 'sessions' | ArtifactCategory)} className={`relative shrink-0 px-3 py-3 text-xs font-medium transition ${tab === item.id ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>{item.label}{count !== undefined && count > 0 && <span className="ml-1.5 text-[9px] text-zinc-600">{count}</span>}{tab === item.id && <span className="absolute inset-x-2 bottom-0 h-px bg-indigo-400"/>}</button> })}</nav>
     {tab === 'sessions' ? (!sessions.data ? <LoadingState error={sessions.error as Error}/> : sessions.data.length === 0 ? <div className="panel p-10 text-center text-sm text-zinc-500">No trace-capable sessions found yet.</div> : <div className="space-y-3">{sessions.data.map(session=><button key={session.session_id} onClick={()=>setSelected(session.session_id)} className="panel flex w-full items-center gap-4 p-5 text-left transition hover:bg-white/[0.055]"><span className={`h-2.5 w-2.5 rounded-full ${session.status === 'live' ? 'bg-emerald-400 shadow-[0_0_10px_#34d399]' : 'bg-zinc-700'}`}/><div className="min-w-0 flex-1"><div className="truncate font-medium">{projectName(session.project_path)}</div><div className="mt-1 truncate text-xs text-zinc-500">{session.model || 'Unknown model'} · {relativeTime(session.last_active)}</div></div><div className="text-right"><div className="text-sm font-medium">{compactNumber(session.total_tokens)} tokens</div><div className="mt-1 text-xs text-zinc-500">{session.tool_calls} tools · {session.event_count} events</div></div><ChevronRight size={16} className="text-zinc-600"/></button>)}</div>) : (!artifactQuery.data ? <LoadingState error={artifactQuery.error as Error}/> : <ArtifactBrowser artifacts={artifacts} category={tab}/>)}</>
 }
 

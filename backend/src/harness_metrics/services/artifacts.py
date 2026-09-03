@@ -14,7 +14,8 @@ SECRET_KEY = re.compile(r"(?i)(api[_-]?key|access[_-]?token|auth[_-]?token|passw
 # A path may intentionally appear twice when it contains both settings and hooks.
 GLOBAL_PATTERNS: dict[str, list[tuple[str, str]]] = {
     "claude": [
-        ("instructions", ".claude/CLAUDE.md"), ("settings", ".claude/settings.json"),
+        ("memory", ".claude/CLAUDE.md"),
+        ("settings", ".claude/settings.json"),
         ("hooks", ".claude/settings.json"), ("rules", ".claude/rules/**/*.md"),
         ("skills", ".claude/skills/**/SKILL.md"),
     ],
@@ -25,12 +26,13 @@ GLOBAL_PATTERNS: dict[str, list[tuple[str, str]]] = {
     ],
     "cursor": [
         ("settings", ".cursor/mcp.json"), ("hooks", ".cursor/hooks.json"),
-        ("skills", ".cursor/skills/**/SKILL.md"), ("skills", ".agents/skills/**/SKILL.md"),
+        ("skills", ".cursor/skills/**/SKILL.md"), ("skills", ".cursor/skills-cursor/**/SKILL.md"),
+        ("skills", ".agents/skills/**/SKILL.md"),
     ],
     "kiro": [
         ("settings", ".kiro/settings/*.json"), ("rules", ".kiro/steering/**/*.md"),
         ("hooks", ".kiro/hooks/**/*"), ("skills", ".kiro/skills/**/SKILL.md"),
-        ("skills", ".kiro/powers/*/plugin.json"),
+        ("skills", ".kiro/powers/*/plugin.json"), ("settings", ".kiro/powers/installed.json"),
     ],
     "opencode": [
         ("instructions", ".config/opencode/AGENTS.md"), ("settings", ".config/opencode/opencode.json*"),
@@ -39,6 +41,7 @@ GLOBAL_PATTERNS: dict[str, list[tuple[str, str]]] = {
     ],
     "antigravity": [
         ("instructions", ".gemini/GEMINI.md"), ("settings", ".gemini/settings.json"),
+        ("settings", ".gemini/config/config.json"), ("settings", ".gemini/config/mcp_config.json"),
         ("rules", ".gemini/antigravity/rules/**/*.md"),
         ("hooks", ".gemini/config/global_workflows/**/*.md"),
         ("skills", ".gemini/antigravity/skills/**/SKILL.md"),
@@ -47,8 +50,8 @@ GLOBAL_PATTERNS: dict[str, list[tuple[str, str]]] = {
 
 PROJECT_PATTERNS: dict[str, list[tuple[str, str]]] = {
     "claude": [
-        ("instructions", "CLAUDE.md"), ("instructions", "CLAUDE.local.md"),
-        ("instructions", ".claude/CLAUDE.md"), ("settings", ".claude/settings.json"),
+        ("memory", "CLAUDE.md"), ("memory", "CLAUDE.local.md"),
+        ("memory", ".claude/CLAUDE.md"), ("settings", ".claude/settings.json"),
         ("settings", ".claude/settings.local.json"), ("hooks", ".claude/settings.json"),
         ("hooks", ".claude/settings.local.json"), ("rules", ".claude/rules/**/*.md"),
         ("skills", ".claude/skills/**/SKILL.md"),
@@ -174,7 +177,7 @@ class ArtifactService:
         encoded = str(project).replace("/", "-")
         memory = self._collect([(
             self.home, "project", str(project), "claude",
-            [("memory", f".claude/projects/{encoded}/memory/*.md")],
+            [("memory", f".claude/projects/{encoded}/memory/**/*.md")],
         )])
         existing = {(item["category"], item["path"]) for item in artifacts}
         artifacts.extend(item for item in memory if (item["category"], item["path"]) not in existing)

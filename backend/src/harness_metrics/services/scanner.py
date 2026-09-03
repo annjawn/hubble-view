@@ -6,6 +6,9 @@ from harness_metrics.database import Database
 from harness_metrics.providers import ProviderAdapter
 from harness_metrics.providers.claude_trace import parse_claude_trace
 from harness_metrics.providers.codex_trace import parse_codex_trace
+from harness_metrics.providers.provider_traces import (
+    parse_antigravity_trace, parse_cursor_trace, parse_kiro_trace, parse_opencode_trace,
+)
 
 
 class UsageScanner:
@@ -69,6 +72,10 @@ class UsageScanner:
                     trace_events = (
                         parse_claude_trace(path, path.parent.name) if provider.id == "claude"
                         else parse_codex_trace(path) if provider.id == "codex"
+                        else parse_cursor_trace(path, provider._composer_snapshot(path.stem)) if provider.id == "cursor"
+                        else parse_kiro_trace(path) if provider.id == "kiro"
+                        else parse_opencode_trace(path, provider._database()) if provider.id == "opencode"
+                        else parse_antigravity_trace(path) if provider.id == "antigravity"
                         else ()
                     )
                     for event in trace_events:
