@@ -12,7 +12,7 @@
     "dev:electron": "wait-on tcp:5173 && electron-vite build --mode development && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "build": "tsc -b && vite build && electron-vite build",
     "backend:bundle": "node scripts/build-backend.mjs",
-    "dist:mac": "npm run backend:bundle && npm run build && electron-builder --mac dmg",
+    "dist:mac": "npm run backend:bundle && npm run build && node scripts/build-macos.mjs",
     "dist:win": "npm run backend:bundle && npm run build && electron-builder --win nsis",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run --passWithNoTests",
@@ -67,6 +67,7 @@
     "mac": {
       "icon": "icons/macos/icon.icns",
       "category": "public.app-category.developer-tools",
+      "minimumSystemVersion": "13.0",
       "target": [
         "dmg"
       ]

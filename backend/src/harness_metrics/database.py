@@ -32,6 +32,25 @@ CREATE TABLE IF NOT EXISTS scanned_files (
   mtime REAL NOT NULL,
   scanned_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS trace_events (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  project_path TEXT,
+  model TEXT,
+  occurred_at TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  role TEXT,
+  name TEXT,
+  content TEXT,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS trace_session_time_idx ON trace_events(provider, session_id, occurred_at);
+CREATE INDEX IF NOT EXISTS trace_provider_time_idx ON trace_events(provider, occurred_at);
 CREATE TABLE IF NOT EXISTS app_settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -140,6 +159,26 @@ class Database:
                 connection.execute(
                     """INSERT INTO app_settings(key, value)
                     VALUES ('remove_claude_cost_estimates_v1', 'true')
+                    ON CONFLICT(key) DO NOTHING"""
+                )
+            trace_capture = connection.execute(
+                "SELECT value FROM app_settings WHERE key = 'claude_trace_capture_v1'"
+            ).fetchone()
+            if trace_capture is None:
+                connection.execute("DELETE FROM scanned_files WHERE provider = 'claude'")
+                connection.execute(
+                    """INSERT INTO app_settings(key, value)
+                    VALUES ('claude_trace_capture_v1', 'true')
+                    ON CONFLICT(key) DO NOTHING"""
+                )
+            codex_trace_capture = connection.execute(
+                "SELECT value FROM app_settings WHERE key = 'codex_trace_capture_v1'"
+            ).fetchone()
+            if codex_trace_capture is None:
+                connection.execute("DELETE FROM scanned_files WHERE provider = 'codex'")
+                connection.execute(
+                    """INSERT INTO app_settings(key, value)
+                    VALUES ('codex_trace_capture_v1', 'true')
                     ON CONFLICT(key) DO NOTHING"""
                 )
 

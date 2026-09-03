@@ -25,6 +25,35 @@ def providers(request: Request):
     return [provider.status() for provider in request.app.state.providers]
 
 
+@router.get("/providers/{provider}/sessions")
+def provider_sessions(provider: str, request: Request):
+    if provider not in {item.id for item in request.app.state.providers}:
+        raise HTTPException(404, "Unknown provider")
+    request.app.state.scanner.scan()
+    return request.app.state.analytics.provider_sessions(provider)
+
+
+@router.get("/providers/{provider}/artifacts")
+def provider_artifacts(provider: str, request: Request):
+    if provider not in {item.id for item in request.app.state.providers}:
+        raise HTTPException(404, "Unknown provider")
+    return request.app.state.artifacts.global_list(provider)
+
+
+@router.get("/projects/artifacts")
+def project_artifacts(request: Request, project_path: str = Query(...)):
+    result = request.app.state.artifacts.project_list(project_path)
+    if result is None:
+        raise HTTPException(404, "Unknown project")
+    return result
+
+
+@router.get("/providers/{provider}/sessions/{session_id}/events")
+def session_events(provider: str, session_id: str, request: Request, limit: int = Query(500, ge=1, le=2000)):
+    request.app.state.scanner.scan()
+    return request.app.state.analytics.session_events(provider, session_id, limit)
+
+
 @router.post("/scan")
 def scan(request: Request):
     return {"imported": request.app.state.scanner.scan()}
@@ -49,4 +78,3 @@ def update_settings(payload: SettingsUpdate, request: Request):
     for key, value in values.items():
         request.app.state.database.set_setting(key, value)
     return get_settings(request)
-

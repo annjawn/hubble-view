@@ -7,7 +7,7 @@
 
   <p>
     <img alt="Local first" src="https://img.shields.io/badge/local--first-private-6366f1?style=for-the-badge" />
-    <img alt="macOS" src="https://img.shields.io/badge/macOS-desktop-111827?style=for-the-badge&logo=apple&logoColor=white" />
+    <img alt="macOS 13+ Apple Silicon" src="https://img.shields.io/badge/macOS_13%2B-Apple_Silicon-111827?style=for-the-badge&logo=apple&logoColor=white" />
     <img alt="Windows" src="https://img.shields.io/badge/Windows-desktop-2563eb?style=for-the-badge&logo=windows11&logoColor=white" />
     <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-f59e0b?style=for-the-badge" />
   </p>
@@ -20,6 +20,8 @@
 ---
 
 Hubble brings the activity scattered across your coding agents into one focused desktop experience. See which tools are active, understand where your tokens are going, discover your most active projects, and follow your momentum over time—without sending your development history to another cloud.
+
+The macOS build currently requires macOS 13 or newer on an Apple Silicon Mac. Intel Macs are not supported.
 
 <div align="center">
   <img src="assets/hubble.png" alt="Hubble dashboard showing coding-agent activity, models, and projects" width="920" />

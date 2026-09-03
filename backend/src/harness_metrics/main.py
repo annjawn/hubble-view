@@ -9,6 +9,7 @@ from harness_metrics.config import Settings, settings
 from harness_metrics.database import Database
 from harness_metrics.providers import ProviderAdapter, provider_registry
 from harness_metrics.services.analytics import AnalyticsService
+from harness_metrics.services.artifacts import ArtifactService
 from harness_metrics.services.scanner import UsageScanner
 
 
@@ -44,6 +45,7 @@ def create_app(app_settings: Settings = settings, adapters: list[ProviderAdapter
     app.state.providers = providers
     app.state.scanner = scanner
     app.state.analytics = AnalyticsService(database)
+    app.state.artifacts = ArtifactService(database)
     app.include_router(router)
     return app
 

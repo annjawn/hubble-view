@@ -5,6 +5,16 @@ from fastapi.testclient import TestClient
 
 from harness_metrics.config import Settings
 from harness_metrics.main import create_app
+from harness_metrics.providers.base import ProviderAdapter
+from harness_metrics.services.artifacts import ArtifactService
+
+
+class EmptyClaudeAdapter(ProviderAdapter):
+    id = "claude"
+    name = "Claude Code"
+    def log_roots(self): return []
+    def discover(self): return []
+    def parse(self, path): return []
 
 
 def test_health_and_empty_overview(tmp_path: Path):
@@ -72,3 +82,60 @@ def test_overview_aggregates_usage_by_provider_and_model(tmp_path: Path):
         ]
         claude = models[0]
         assert (claude["tokens"], claude["sessions"]) == (392, 2)
+
+
+def test_provider_session_and_trace_endpoints(tmp_path: Path):
+    app = create_app(Settings(data_dir=tmp_path, database_path=tmp_path / "test.db"), adapters=[EmptyClaudeAdapter()])
+    now = datetime.now(timezone.utc).isoformat()
+    with TestClient(app) as client:
+        with app.state.database.connect() as connection:
+            connection.execute(
+                """INSERT INTO trace_events
+                (id, provider, session_id, project_path, model, occurred_at, kind, role,
+                 content, input_tokens, output_tokens)
+                VALUES ('trace-1', 'claude', 'session-1', '/tmp/project', 'claude-test', ?,
+                        'message', 'assistant', 'Done', 10, 4)""", (now,)
+            )
+        sessions = client.get("/api/providers/claude/sessions").json()
+        assert sessions[0]["status"] == "live"
+        assert sessions[0]["total_tokens"] == 14
+        events = client.get("/api/providers/claude/sessions/session-1/events").json()
+        assert events[0]["content"] == "Done"
+
+
+def test_artifacts_include_global_and_project_files_and_redact_secrets(tmp_path: Path):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (home / ".claude").mkdir(parents=True)
+    (project / ".claude" / "rules").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text('{"apiKey":"private", "theme":"dark"}')
+    (home / ".claude" / "CLAUDE.md").write_text("Global guidance")
+    (project / "CLAUDE.md").write_text("Project guidance")
+    (project / ".claude" / "rules" / "tests.md").write_text("Always test")
+    app = create_app(Settings(data_dir=tmp_path, database_path=tmp_path / "test.db"), adapters=[EmptyClaudeAdapter()])
+    with TestClient(app) as client:
+        app.state.artifacts = ArtifactService(app.state.database, home)
+        with app.state.database.connect() as connection:
+            connection.execute(
+                """INSERT INTO usage_events(id, provider, session_id, project_path, occurred_at)
+                VALUES ('one', 'claude', 'session', ?, ?)""",
+                (str(project), datetime.now(timezone.utc).isoformat()),
+            )
+        global_response = client.get("/api/providers/claude/artifacts")
+        assert global_response.status_code == 200
+        global_artifacts = global_response.json()["artifacts"]
+        assert {(item["scope"], item["name"]) for item in global_artifacts} >= {
+            ("global", "CLAUDE.md"), ("global", "settings.json")
+        }
+        assert all(item["scope"] == "global" for item in global_artifacts)
+        project_response = client.get("/api/projects/artifacts", params={"project_path": str(project)})
+        assert project_response.status_code == 200
+        project_artifacts = project_response.json()["artifacts"]
+        assert {(item["scope"], item["name"]) for item in project_artifacts} >= {
+            ("project", "CLAUDE.md"), ("project", "tests.md")
+        }
+        assert all(item["scope"] == "project" for item in project_artifacts)
+        settings = next(item for item in global_artifacts if item["category"] == "settings")
+        assert "private" not in settings["content"]
+        assert "dark" in settings["content"]
+        assert client.get("/api/projects/artifacts", params={"project_path": str(tmp_path / 'other')}).status_code == 404

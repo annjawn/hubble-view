@@ -8,6 +8,8 @@ from harness_metrics.providers.kiro import KiroAdapter
 from harness_metrics.providers.codex import CodexAdapter
 from harness_metrics.providers.opencode import OpenCodeAdapter
 from harness_metrics.providers.antigravity import AntigravityAdapter
+from harness_metrics.providers.claude_trace import parse_claude_trace
+from harness_metrics.providers.codex_trace import parse_codex_trace
 
 
 def test_parses_claude_message_usage(tmp_path: Path):
@@ -34,6 +36,56 @@ def test_claude_repeated_request_records_share_one_event_id(tmp_path: Path):
     events = list(parse_common(log, "claude"))
     assert len(events) == 3
     assert len({event.id for event in events}) == 1
+
+
+def test_claude_trace_normalizes_messages_and_tools(tmp_path: Path):
+    log = tmp_path / "session.jsonl"
+    log.write_text("\n".join([
+        json.dumps({"uuid": "user-1", "sessionId": "session-1", "timestamp": "2026-08-31T00:00:00Z",
+                    "cwd": str(tmp_path), "type": "user", "message": {"role": "user", "content": "Fix it"}}),
+        json.dumps({"uuid": "assistant-1", "sessionId": "session-1", "timestamp": "2026-08-31T00:00:01Z",
+                    "type": "assistant", "message": {"role": "assistant", "model": "claude-test",
+                    "usage": {"input_tokens": 10, "output_tokens": 4}, "content": [
+                        {"type": "text", "text": "Working"},
+                        {"type": "tool_use", "id": "tool-1", "name": "Read", "input": {"file_path": "a.py"}},
+                    ]}}),
+    ]))
+    events = list(parse_claude_trace(log))
+    assert [(event["kind"], event["content"]) for event in events[:2]] == [
+        ("message", "Fix it"), ("message", "Working")
+    ]
+    assert (events[2]["kind"], events[2]["name"]) == ("tool_call", "Read")
+    assert (events[1]["input_tokens"], events[1]["output_tokens"]) == (10, 4)
+
+
+def test_codex_trace_normalizes_messages_tools_and_usage(tmp_path: Path):
+    log = tmp_path / "rollout.jsonl"
+    records = [
+        {"timestamp": "2026-09-02T00:00:00Z", "type": "session_meta",
+         "payload": {"type": "session_meta", "id": "session-1", "cwd": str(tmp_path)}},
+        {"timestamp": "2026-09-02T00:00:01Z", "type": "turn_context",
+         "payload": {"type": "turn_context", "model": "gpt-test", "cwd": str(tmp_path)}},
+        {"timestamp": "2026-09-02T00:00:02Z", "type": "response_item",
+         "payload": {"type": "message", "id": "message-1", "role": "user",
+                     "content": [{"type": "input_text", "text": "Fix it"}]}},
+        {"timestamp": "2026-09-02T00:00:03Z", "type": "response_item",
+         "payload": {"type": "function_call", "id": "call-record", "call_id": "call-1",
+                     "name": "exec_command", "arguments": "{\"cmd\":\"pytest\"}"}},
+        {"timestamp": "2026-09-02T00:00:04Z", "type": "event_msg", "ordinal": 4,
+         "payload": {"type": "token_count", "info": {"last_token_usage": {
+             "input_tokens": 110, "cached_input_tokens": 100, "output_tokens": 5,
+             "cache_write_input_tokens": 2,
+         }}}},
+    ]
+    log.write_text("\n".join(json.dumps(record) for record in records))
+    events = list(parse_codex_trace(log))
+    assert (events[0]["session_id"], events[0]["model"], events[0]["content"]) == (
+        "session-1", "gpt-test", "Fix it"
+    )
+    assert (events[1]["kind"], events[1]["name"]) == ("tool_call", "exec_command")
+    assert (events[2]["kind"], events[2]["input_tokens"], events[2]["cache_read_tokens"]) == (
+        "usage", 10, 100
+    )
 
 
 def test_parses_codex_nested_incremental_usage(tmp_path: Path):

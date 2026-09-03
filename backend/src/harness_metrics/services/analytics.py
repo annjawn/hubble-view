@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -133,3 +134,35 @@ class AnalyticsService:
                     "source": "local",
                 })
         return result
+
+    def provider_sessions(self, provider: str) -> list[dict[str, Any]]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """SELECT session_id, MAX(project_path) project_path, MAX(model) model,
+                MIN(occurred_at) started_at, MAX(occurred_at) last_active,
+                SUM(input_tokens) input_tokens, SUM(output_tokens) output_tokens,
+                SUM(cache_read_tokens) cache_read_tokens, SUM(cache_write_tokens) cache_write_tokens,
+                SUM(CASE WHEN kind = 'tool_call' THEN 1 ELSE 0 END) tool_calls,
+                COUNT(*) event_count
+                FROM trace_events WHERE provider = ? GROUP BY session_id
+                ORDER BY last_active DESC LIMIT 100""", (provider,)
+            ).fetchall()
+        now = datetime.now(timezone.utc)
+        result = []
+        for row in rows:
+            item = dict(row)
+            last = datetime.fromisoformat(item["last_active"].replace("Z", "+00:00"))
+            item["status"] = "live" if (now - last).total_seconds() <= 120 else "ended"
+            item["total_tokens"] = sum(item[key] for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"))
+            result.append(item)
+        return result
+
+    def session_events(self, provider: str, session_id: str, limit: int = 500) -> list[dict[str, Any]]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """SELECT id, occurred_at, kind, role, name, content, model,
+                input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, metadata
+                FROM trace_events WHERE provider = ? AND session_id = ?
+                ORDER BY occurred_at, id LIMIT ?""", (provider, session_id, limit)
+            ).fetchall()
+        return [{**dict(row), "metadata": json.loads(row["metadata"])} for row in rows]
