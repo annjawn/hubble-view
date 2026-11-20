@@ -13,7 +13,12 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pyinstaller>=6.16.0", "pytest>=8.4.0", "pytest-asyncio>=1.1.0"]
+dev = [
+    "pyinstaller>=6.16.0",
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.1.0",
+    "ruff>=0.17.6",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -28,3 +33,12 @@ testpaths = ["tests"]
 
 [tool.uv]
 python-preference = "only-managed"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# Explicit and narrow on purpose: import errors, syntax errors, pyflakes,
+# likely bugs, and import order. Ruff's default set is far broader.
+select = ["E4", "E9", "F", "B", "I"]
