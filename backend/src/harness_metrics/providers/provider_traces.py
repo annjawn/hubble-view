@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .antigravity import _fields, _message, _string, _timestamp, _workspace
-from .jsonl import _project_root
+from .antigravity import _fields, _message, _timestamp, _workspace
+from .jsonl import _project_root, read_jsonl
 
 
 def _id(provider: str, source: Path, *parts: object) -> str:
@@ -26,9 +26,8 @@ def _event(provider: str, source: Path, identity: object, session_id: str, occur
 
 def parse_cursor_trace(path: Path, snapshot: dict[str, Any]) -> Iterable[dict[str, Any]]:
     try:
-        records = [json.loads(line) for line in path.read_text(encoding="utf-8", errors="replace").splitlines()]
         base = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
-    except (OSError, json.JSONDecodeError):
+    except OSError:
         return
     workspace = snapshot.get("workspaceIdentifier")
     uri = workspace.get("uri") if isinstance(workspace, dict) else None
@@ -36,15 +35,13 @@ def parse_cursor_trace(path: Path, snapshot: dict[str, Any]) -> Iterable[dict[st
     config = snapshot.get("modelConfig") if isinstance(snapshot.get("modelConfig"), dict) else {}
     model = config.get("modelName")
     session_id = path.stem
-    for line_no, record in enumerate(records):
-        if not isinstance(record, dict):
-            continue
+    for line_no, record in read_jsonl(path):
         role = str(record.get("role") or "assistant")
         message = record.get("message") if isinstance(record.get("message"), dict) else {}
         blocks = message.get("content") if isinstance(message.get("content"), list) else [message.get("content")]
         timestamp = (base + timedelta(microseconds=line_no)).isoformat()
         for block_no, block in enumerate(blocks):
-            kind, name, content, metadata = "message", None, None, {}
+            kind, name, content, metadata = "message", None, None, {"timestamp_source": "file-mtime"}
             if isinstance(block, str):
                 content = block
             elif isinstance(block, dict):
@@ -71,18 +68,23 @@ def parse_kiro_trace(path: Path) -> Iterable[dict[str, Any]]:
     if path.suffix != ".jsonl":
         return
     try:
-        records = [json.loads(line) for line in path.read_text(encoding="utf-8", errors="replace").splitlines()]
         metadata = json.loads((path.parent / "session.json").read_text(encoding="utf-8"))
+        fallback_time = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
     except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(metadata, dict):
         return
     session_id = str(metadata.get("id") or path.parent.name)
     roots = metadata.get("workspacePaths") or metadata.get("rootPaths") or []
     project = _project_root(roots[0]) if roots else None
     model = str(metadata.get("modelId")) if metadata.get("modelId") else None
-    for index, record in enumerate(records):
-        payload = record.get("payload") if isinstance(record, dict) and isinstance(record.get("payload"), dict) else {}
+    for index, record in read_jsonl(path):
+        payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
         kind_type = payload.get("type")
-        occurred_at = str(record.get("timestamp") or metadata.get("lastModifiedAt") or metadata.get("createdAt"))
+        # str(None) would persist the literal "None" and break date handling.
+        occurred_at = str(
+            record.get("timestamp") or metadata.get("lastModifiedAt") or metadata.get("createdAt") or fallback_time
+        )
         kind = role = name = content = None
         extra: dict[str, Any] = {}
         if kind_type in {"user", "assistant"}:
@@ -103,15 +105,17 @@ def parse_kiro_trace(path: Path) -> Iterable[dict[str, Any]]:
                          kind, role, content, project=project, model=model, name=name, metadata=extra)
 
 
-def parse_opencode_trace(path: Path, database: Path) -> Iterable[dict[str, Any]]:
+def parse_opencode_trace(path: Path, database: Path, since: int | None = None) -> Iterable[dict[str, Any]]:
+    """``since`` (epoch ms) limits the read to parts updated at or after it."""
     if not database.exists():
         return
+    changed = "" if since is None else " WHERE p.time_updated >= :since"
     try:
         connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=5)
         connection.row_factory = sqlite3.Row
         rows = connection.execute("""SELECT p.id,p.session_id,p.time_created,p.data,m.data message_data,s.directory
-            FROM part p JOIN message m ON m.id=p.message_id JOIN session s ON s.id=p.session_id
-            ORDER BY p.time_created,p.id""").fetchall()
+            FROM part p JOIN message m ON m.id=p.message_id JOIN session s ON s.id=p.session_id"""
+            + changed + " ORDER BY p.time_created,p.id", {"since": since or 0}).fetchall()
         connection.close()
     except sqlite3.Error:
         return

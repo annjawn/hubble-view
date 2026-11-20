@@ -8,7 +8,6 @@ from urllib.parse import unquote, urlparse
 from .base import ProviderAdapter, UsageEvent
 from .jsonl import _project_root
 
-
 WireValue = int | bytes
 
 

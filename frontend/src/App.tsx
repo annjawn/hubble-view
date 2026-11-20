@@ -6,12 +6,16 @@ import { ProvidersView } from './views/ProvidersView'
 import { SettingsView } from './views/SettingsView'
 import { TrayView } from './views/TrayView'
 import { SplashView } from './views/SplashView'
+import { SearchView } from './views/SearchView'
 
 export function App() {
   const [view, setView] = useState<View>('overview')
+  // A search result opens its session inside the Providers view.
+  const [target, setTarget] = useState<{ provider: string; sessionId: string } | null>(null)
+  const change = (next: View) => { setTarget(null); setView(next) }
   const route = window.location.hash.slice(1) || window.location.pathname
   if (route === '/splash') return <SplashView />
   if (route === '/tray') return <TrayView />
-  const views = { overview: <OverviewView/>, projects: <ProjectsView/>, providers: <ProvidersView/>, settings: <SettingsView/> }
-  return <div className="flex h-screen overflow-hidden"><Sidebar view={view} onChange={setView}/><main id="app-scroll-container" className="min-w-0 flex-1 overflow-y-auto"><div className="drag-region h-10"/><div className="mx-auto max-w-[1180px] px-8 pb-10">{views[view]}</div></main></div>
+  const views = { overview: <OverviewView/>, projects: <ProjectsView/>, providers: <ProvidersView key={target ? `${target.provider}:${target.sessionId}` : 'providers'} initial={target}/>, search: <SearchView onOpen={(provider, sessionId) => { setTarget({ provider, sessionId }); setView('providers') }}/>, settings: <SettingsView/> }
+  return <div className="flex h-screen overflow-hidden"><Sidebar view={view} onChange={change}/><main id="app-scroll-container" className="min-w-0 flex-1 overflow-y-auto"><div className="drag-region h-10"/><div className="mx-auto max-w-[1180px] px-8 pb-10">{views[view]}</div></main></div>
 }

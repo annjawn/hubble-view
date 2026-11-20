@@ -14,3 +14,10 @@ export function relativeTime(value: string | null) {
   if (Math.abs(seconds) < 86400) return formatter.format(Math.round(seconds / 3600), 'hour')
   return formatter.format(Math.round(seconds / 86400), 'day')
 }
+
+/** API list-price estimate, e.g. "≈ $12.40". Sub-cent values show as "< $0.01". */
+export function estimate(value: number | null | undefined) {
+  if (value === null || value === undefined) return 'no list price'
+  if (value > 0 && value < 0.01) return '≈ < $0.01'
+  return `≈ ${currency(value)}`
+}

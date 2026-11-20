@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { createWriteStream, mkdirSync } from 'node:fs'
 import { createServer } from 'node:net'
 import path from 'node:path'
@@ -16,6 +17,9 @@ let apiBaseUrl = ''
 let startupStatus: StartupStatus = { phase: 'starting' }
 let splashShownAt = 0
 let quitting = false
+// Per-launch secret shared only with the local service and our own renderers, so
+// other local pages cannot read transcript data from the loopback API.
+const apiToken = randomBytes(32).toString('hex')
 
 app.setName('Hubble')
 
@@ -48,17 +52,36 @@ function availablePort(): Promise<number> {
   })
 }
 
-async function waitUntilReady(url: string) {
+type Health = { status: string; initial_scan_complete?: boolean }
+
+async function fetchHealth(url: string, child: ChildProcess): Promise<Health | null> {
+  if (child.exitCode !== null) throw new Error(`Local service exited with code ${child.exitCode}`)
+  if (startupStatus.phase === 'error') throw new Error(startupStatus.detail ?? 'Local service failed to start')
+  try {
+    const response = await fetch(`${url}/health`, { headers: { 'X-Hubble-Token': apiToken } })
+    if (response.ok) return await response.json() as Health
+  } catch { /* Service is still starting. */ }
+  return null
+}
+
+async function waitUntilReady(url: string, child: ChildProcess) {
   const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
-    if (backend?.exitCode !== null) throw new Error(`Local service exited with code ${backend?.exitCode}`)
-    try {
-      const response = await fetch(`${url}/health`)
-      if (response.ok) return
-    } catch { /* Service is still starting. */ }
+    if (await fetchHealth(url, child)) return
     await new Promise(resolve => setTimeout(resolve, 250))
   }
   throw new Error('Local service did not become ready in time')
+}
+
+// The service answers /health before its first import finishes. Keep the splash
+// up while a large history is imported, but never hold the window hostage.
+async function waitForInitialScan(url: string, child: ChildProcess) {
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline) {
+    const health = await fetchHealth(url, child)
+    if (health && health.initial_scan_complete !== false) return
+    await new Promise(resolve => setTimeout(resolve, 500))
+  }
 }
 
 async function startBackend() {
@@ -81,6 +104,7 @@ async function startBackend() {
     env: {
       ...process.env,
       HARNESS_METRICS_DATA_DIR: dataDir,
+      HARNESS_METRICS_API_TOKEN: apiToken,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -95,9 +119,10 @@ async function startBackend() {
     log.end(`\nLocal service exited with code ${code ?? 'unknown'}\n`)
     if (!quitting && backend === child) setStartupStatus({ phase: 'error', detail: 'The local service stopped unexpectedly' })
   })
-  setStartupStatus({ phase: 'scanning' })
   try {
-    await waitUntilReady(apiBaseUrl)
+    await waitUntilReady(apiBaseUrl, child)
+    setStartupStatus({ phase: 'scanning' })
+    await waitForInitialScan(apiBaseUrl, child)
     setStartupStatus({ phase: 'ready' })
     await revealMainWindow()
   } catch (error) {
@@ -183,12 +208,23 @@ function createTray() {
   ]))
 }
 
+// A second instance would start a second service writing the same database.
+const hasInstanceLock = app.requestSingleInstanceLock()
+if (!hasInstanceLock) app.quit()
+app.on('second-instance', () => {
+  const window = startupStatus.phase === 'ready' ? mainWindow : splashWindow
+  if (window?.isMinimized()) window.restore()
+  window?.show(); window?.focus()
+})
+
 app.whenReady().then(() => {
+  if (!hasInstanceLock) return
   // Dev only: the packaged .app already carries icon.icns, and a runtime-set dock image
   // bypasses macOS's icon masking (Tahoe squircle), making the Dock icon look wrong.
   if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(appIcon())
   ipcMain.handle('startup:status', () => startupStatus)
   ipcMain.handle('startup:apiBaseUrl', getApiBaseUrl)
+  ipcMain.handle('startup:apiToken', () => apiToken)
   ipcMain.handle('startup:retry', async () => {
     backend?.kill()
     backend = null
@@ -202,7 +238,14 @@ app.whenReady().then(() => {
     else { splashWindow?.show(); splashWindow?.focus() }
     trayWindow?.hide()
   })
-  ipcMain.handle('app:openPath', (_event, target: string) => shell.openPath(target))
+  ipcMain.handle('app:openPath', (_event, target: unknown) => {
+    // shell.openPath launches whatever it is given; only Hubble's own data
+    // directory is ever opened from the renderer.
+    const dataDir = app.getPath('userData')
+    const resolved = typeof target === 'string' ? path.resolve(target) : ''
+    if (resolved !== dataDir && !resolved.startsWith(dataDir + path.sep)) return 'Path is outside the Hubble data directory'
+    return shell.openPath(resolved)
+  })
   ipcMain.handle('app:setLoginItem', (_event, enabled: boolean) => app.setLoginItemSettings({ openAtLogin: enabled }))
   app.on('activate', () => {
     if (startupStatus.phase === 'ready') mainWindow?.show()

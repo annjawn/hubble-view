@@ -1,5 +1,5 @@
-from .base import ProviderAdapter
 from .antigravity import AntigravityAdapter
+from .base import ProviderAdapter
 from .claude import ClaudeAdapter
 from .codex import CodexAdapter
 from .cursor import CursorAdapter

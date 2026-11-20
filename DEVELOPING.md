@@ -102,11 +102,12 @@ The packaged service writes diagnostics to `logs/service.log`. Do not commit use
 
 ## Verification
 
-Run the backend suite:
+Run the backend suite and linter:
 
 ```bash
 cd backend
 uv run --group dev python -m pytest
+uv run ruff check .
 ```
 
 Run frontend checks:
@@ -118,7 +119,13 @@ npm test
 npm run build
 ```
 
+Continuous integration (`.github/workflows/ci.yml`) runs these checks on pushes to `main` and on pull requests.
+
 For a change that touches provider parsing, add a minimal synthetic fixture to `backend/tests/test_parsers.py`. Tests must not depend on a developer's real harness data or home directory.
+
+## Cost estimates
+
+`backend/src/harness_metrics/pricing.py` holds public API list prices with the date and source URLs they were read from. Hubble uses them only to label an estimate of what recorded tokens would cost at list price; it never claims an amount billed. When prices change, update the table, `PRICING_VERSION`, and the sources together. Models missing from the table are reported as unpriced rather than guessed.
 
 ## Adding or changing a provider
 

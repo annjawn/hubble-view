@@ -8,7 +8,7 @@ from kiro_usage import CHARS_PER_TOKEN, CLI_DB, IDE_DB, calc_cost
 from kiro_usage.viewer import load_all_sessions, load_ide_usage
 
 from .base import ProviderAdapter, UsageEvent
-from .jsonl import _project_root
+from .jsonl import _project_root, read_jsonl
 
 
 class KiroAdapter(ProviderAdapter):
@@ -46,10 +46,7 @@ class KiroAdapter(ProviderAdapter):
         project = _project_root(workspace_paths[0]) if workspace_paths else None
         session_id = str(metadata.get("id") or path.parent.name)
         model = str(metadata.get("modelId")) if metadata.get("modelId") else None
-        try:
-            records = [json.loads(line) for line in path.read_text(encoding="utf-8", errors="replace").splitlines()]
-        except (OSError, json.JSONDecodeError):
-            return
+        records = [record for _, record in read_jsonl(path)]
 
         turns: list[dict[str, Any]] = []
         current: dict[str, Any] | None = None
