@@ -28,6 +28,69 @@ def _usage(payload: dict[str, Any]) -> dict[str, Any]:
     return usage if isinstance(usage, dict) else {}
 
 
+def read_jsonl(path: Path) -> list[tuple[int, dict[str, Any]]]:
+    """Return ``(line_number, record)`` for every JSON object line in ``path``.
+
+    Harness transcripts are appended while Hubble reads them, so a file can end
+    in a partial line or contain blank/corrupt lines. Those are skipped instead
+    of discarding the whole file.
+    """
+    try:
+        # Split on "\n" only so line numbers agree with read_jsonl_from().
+        lines = path.read_text(encoding="utf-8", errors="replace").split("\n")
+    except OSError:
+        return []
+    records: list[tuple[int, dict[str, Any]]] = []
+    for line_number, line in enumerate(lines):
+        try:
+            payload = json.loads(line)
+        except (json.JSONDecodeError, TypeError, RecursionError):
+            continue
+        if isinstance(payload, dict):
+            records.append((line_number, payload))
+    return records
+
+
+def read_jsonl_from(
+    path: Path, offset: int = 0, line_number: int = 0
+) -> tuple[list[tuple[int, dict[str, Any]]], int, int]:
+    """Read complete lines appended after ``offset``.
+
+    Returns ``(records, next_offset, next_line_number)``. Only lines that end in
+    a newline are consumed, so a line still being written is picked up whole on
+    the next call. Line numbers continue from ``line_number`` and match what a
+    full read with ``read_jsonl`` would assign, which keeps event ids stable.
+    """
+    records: list[tuple[int, dict[str, Any]]] = []
+    try:
+        with path.open("rb") as stream:
+            stream.seek(offset)
+            data = stream.read()
+    except OSError:
+        return records, offset, line_number
+    end = data.rfind(b"\n") + 1
+    if not end:
+        return records, offset, line_number
+    # Split on "\n" only: str.splitlines() also breaks on characters such as
+    # U+2028 that are legal inside a JSON string.
+    for raw in data[:end].split(b"\n")[:-1]:
+        try:
+            payload = json.loads(raw.decode("utf-8", errors="replace"))
+        except (json.JSONDecodeError, TypeError, RecursionError):
+            payload = None
+        if isinstance(payload, dict):
+            records.append((line_number, payload))
+        line_number += 1
+    return records, offset + end, line_number
+
+
+def _float(value: object) -> float:
+    try:
+        return float(value or 0)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _project_root(value: object) -> str | None:
     if not isinstance(value, str) or not value:
         return None
@@ -40,25 +103,33 @@ def _project_root(value: object) -> str | None:
 
 
 def parse_common(
-    path: Path, provider: str, project: str | None = None, model_hint: str | None = None
+    path: Path, provider: str, project: str | None = None, model_hint: str | None = None,
+    session_hint: str | None = None,
+    records: list[tuple[int, dict[str, Any]]] | None = None,
 ) -> Iterable[UsageEvent]:
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return
-    for line_number, line in enumerate(lines):
-        try:
-            payload = json.loads(line)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if not isinstance(payload, dict):
-            continue
+    """Normalize usage lines. ``records`` lets a caller supply an already-read
+    slice of the file (incremental scans); otherwise the whole file is read."""
+    for line_number, payload in (read_jsonl(path) if records is None else records):
         body = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
         usage = _usage(payload)
         item = body.get("item") if isinstance(body.get("item"), dict) else {}
         event_type = str(body.get("type") or payload.get("type", ""))
         item_type = str(item.get("type", ""))
-        tool_calls = 1 if event_type in {"tool", "tool_use", "function_call"} or item_type in {"tool_use", "function_call", "custom_tool_call"} else 0
+        tool_types = {"tool", "tool_use", "function_call", "custom_tool_call"}
+        tool_calls = 1 if event_type in tool_types or item_type in tool_types else 0
+        # Claude Code records tool calls as `tool_use` blocks inside
+        # message.content of an `assistant` line, not as a top-level type.
+        raw_message = payload.get("message")
+        # Only assistant lines count: other record types (for example
+        # `api-request-blob`) replay earlier tool_use blocks as request history.
+        is_assistant = payload.get("type", "assistant") == "assistant"
+        content = raw_message.get("content") if isinstance(raw_message, dict) and is_assistant else None
+        tool_use_ids = [
+            str(block.get("id") or f"{line_number}:{index}")
+            for index, block in enumerate(content if isinstance(content, list) else [])
+            if isinstance(block, dict) and block.get("type") == "tool_use"
+        ]
+        tool_calls += len(tool_use_ids)
         input_tokens = _number(usage, "input_tokens", "inputTokens", "prompt_tokens")
         output_tokens = _number(usage, "output_tokens", "outputTokens", "completion_tokens")
         cache_read = _number(usage, "cache_read_input_tokens", "cache_read_tokens", "cached_input_tokens")
@@ -77,8 +148,8 @@ def parse_common(
         message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
         model = payload.get("model") or body.get("model") or message.get("model") or model_hint
         model_name = str(model) if model else None
-        reported_cost = float(usage.get("cost_usd", 0) or 0)
-        session_id = payload.get("session_id") or payload.get("sessionId") or body.get("session_id") or path.stem
+        reported_cost = _float(usage.get("cost_usd"))
+        session_id = session_hint or payload.get("session_id") or payload.get("sessionId") or body.get("session_id") or path.stem
         request_id = payload.get("requestId") or payload.get("request_id")
         if provider == "claude" and request_id:
             # Claude may persist the same API response several times while a
@@ -104,5 +175,5 @@ def parse_common(
             cost_usd=reported_cost,
             duration_ms=_number(payload, "duration_ms", "durationMs"),
             tool_calls=tool_calls,
-            metadata={"type": event_type},
+            metadata={"type": event_type, **({"tool_use_ids": tool_use_ids} if tool_use_ids else {})},
         )

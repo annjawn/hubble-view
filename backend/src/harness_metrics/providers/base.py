@@ -35,6 +35,19 @@ class ProviderAdapter(ABC):
     @abstractmethod
     def parse(self, path: Path) -> Iterable[UsageEvent]: ...
 
+    def scan_source(
+        self, path: Path, state: dict[str, Any]
+    ) -> tuple[Iterable[UsageEvent], Iterable[dict[str, Any]], dict[str, Any]] | None:
+        """Optional incremental scan.
+
+        ``state`` is whatever this adapter returned for ``path`` last time (empty
+        on first sight). Return ``(usage_events, trace_events, new_state)`` to
+        handle the source here, or ``None`` to let the scanner fall back to a
+        full ``parse``. Implement it only when a source can be read from a saved
+        position without losing context from earlier records.
+        """
+        return None
+
     def status(self) -> dict[str, Any]:
         roots = self.log_roots()
         return {

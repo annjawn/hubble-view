@@ -8,6 +8,7 @@ from typing import Any, Iterable
 
 from .base import ProviderAdapter, UsageEvent
 from .jsonl import _project_root
+from .provider_traces import parse_opencode_trace
 
 
 def _integer(value: object) -> int:
@@ -37,9 +38,35 @@ class OpenCodeAdapter(ProviderAdapter):
             yield database
 
     def parse(self, path: Path) -> Iterable[UsageEvent]:
+        yield from self._usage(None)
+
+    def scan_source(self, path: Path, state: dict[str, Any]):
+        # OpenCode stamps message and part rows with `time_updated` (epoch ms,
+        # observed in opencode.db). Re-reading only rows at or after the last
+        # watermark avoids importing the whole database on every WAL change.
+        database = self._database()
+        since = int(state.get("watermark", 0) or 0)
+        try:
+            connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=5)
+            watermark = connection.execute(
+                """SELECT MAX(stamp) FROM (
+                    SELECT MAX(time_updated) stamp FROM message UNION ALL SELECT MAX(time_updated) FROM part)"""
+            ).fetchone()[0]
+            connection.close()
+        except sqlite3.Error:
+            return None  # older schema without part.time_updated: full parse
+        if not since:
+            usage, trace = list(self._usage(None)), list(parse_opencode_trace(path, database))
+        else:
+            usage, trace = list(self._usage(since)), list(parse_opencode_trace(path, database, since))
+        return usage, trace, {"watermark": int(watermark or since)}
+
+    def _usage(self, since: int | None) -> Iterable[UsageEvent]:
         database = self._database()
         if not database.exists():
             return
+        changed = "" if since is None else """ AND (m.time_updated >= :since OR EXISTS (
+                    SELECT 1 FROM part p WHERE p.message_id = m.id AND p.time_updated >= :since))"""
         try:
             connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=5)
             connection.row_factory = sqlite3.Row
@@ -49,7 +76,8 @@ class OpenCodeAdapter(ProviderAdapter):
                     (SELECT COUNT(*) FROM part p
                      WHERE p.message_id = m.id AND json_extract(p.data, '$.type') = 'tool') tool_calls
                 FROM message m JOIN session s ON s.id = m.session_id
-                WHERE json_extract(m.data, '$.role') = 'assistant'"""
+                WHERE json_extract(m.data, '$.role') = 'assistant'""" + changed,
+                {"since": since or 0},
             ).fetchall()
             connection.close()
         except sqlite3.Error:

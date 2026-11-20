@@ -1,10 +1,11 @@
-import { FolderKanban, Gauge, Settings, Waypoints } from 'lucide-react'
+import { FolderKanban, Gauge, Search, Settings, Waypoints } from 'lucide-react'
 
-export type View = 'overview' | 'projects' | 'providers' | 'settings'
+export type View = 'overview' | 'projects' | 'providers' | 'search' | 'settings'
 const items = [
   { id: 'overview' as const, label: 'Overview', icon: Gauge },
   { id: 'projects' as const, label: 'Projects', icon: FolderKanban },
   { id: 'providers' as const, label: 'Providers', icon: Waypoints },
+  { id: 'search' as const, label: 'Search', icon: Search },
   { id: 'settings' as const, label: 'Settings', icon: Settings },
 ]
 

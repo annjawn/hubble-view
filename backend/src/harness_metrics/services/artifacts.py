@@ -5,9 +5,25 @@ from typing import Any
 
 from harness_metrics.database import Database
 
-
 MAX_ARTIFACT_BYTES = 512_000
-SECRET_KEY = re.compile(r"(?i)(api[_-]?key|access[_-]?token|auth[_-]?token|password|secret|credential)")
+SECRET_KEY = re.compile(
+    r"(?i)(api[_-]?key|private[_-]?key|token|password|passwd|secret|credential|authorization|bearer)"
+)
+# Keys such as `max_tokens` or `tokenizer` describe limits, not credentials.
+NON_SECRET_KEY = re.compile(r"(?i)(tokens|tokenizer|token[_-]?(count|limit|budget))")
+# Well-known credential shapes that can appear in values (for example in an
+# MCP server's `args` list) regardless of the key they are stored under.
+SECRET_VALUE = re.compile(
+    r"(sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
+    r"|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}"
+    r"|(?i:bearer)\s+[A-Za-z0-9._~+/=-]{16,})"
+)
+MASK = "••••••••"
+
+
+def _is_secret_key(key: object) -> bool:
+    text = str(key)
+    return bool(SECRET_KEY.search(text)) and not NON_SECRET_KEY.search(text)
 
 
 # Provider-native configuration locations, normalized into shared UI categories.
@@ -93,19 +109,30 @@ def _redact(content: str, suffix: str) -> str:
     if suffix.lower() in {".json", ".jsonc"}:
         try:
             value = json.loads(content)
-            def clean(item: Any) -> Any:
+
+            def clean(item: Any, secret: bool = False) -> Any:
                 if isinstance(item, dict):
-                    return {key: "••••••••" if SECRET_KEY.search(str(key)) else clean(child) for key, child in item.items()}
+                    return {key: clean(child, secret or _is_secret_key(key)) for key, child in item.items()}
                 if isinstance(item, list):
-                    return [clean(child) for child in item]
+                    return [clean(child, secret) for child in item]
+                if isinstance(item, str):
+                    return MASK if secret and item else SECRET_VALUE.sub(MASK, item)
                 return item
+
             return json.dumps(clean(value), indent=2, ensure_ascii=False)
-        except (json.JSONDecodeError, TypeError):
+        except (json.JSONDecodeError, TypeError, RecursionError):
             pass
-    return re.sub(
-        r"(?im)^(\s*[\w.-]*(?:key|token|password|secret|credential)[\w.-]*\s*[=:]\s*)(.+)$",
-        r"\1\"••••••••\"", content,
+
+    def mask_line(match: re.Match[str]) -> str:
+        key = match.group("key")
+        return match.group(0) if NON_SECRET_KEY.search(key) else f'{match.group("prefix")}"{MASK}"'
+
+    content = re.sub(
+        r"(?im)^(?P<prefix>\s*[\"']?(?P<key>[\w.-]*(?:key|token|password|passwd|secret|credential|authorization)[\w.-]*)"
+        r"[\"']?\s*[=:]\s*)(.+)$",
+        mask_line, content,
     )
+    return SECRET_VALUE.sub(MASK, content)
 
 
 class ArtifactService:
@@ -174,7 +201,9 @@ class ArtifactService:
         ]
         artifacts = self._collect(roots)
         # Claude auto-memory is project-scoped despite living below ~/.claude.
-        encoded = str(project).replace("/", "-")
+        # <project> is the path with non-alphanumeric characters replaced by "-"
+        # (https://code.claude.com/docs/en/sessions "Where transcripts are stored").
+        encoded = re.sub(r"[^A-Za-z0-9]", "-", str(project))
         memory = self._collect([(
             self.home, "project", str(project), "claude",
             [("memory", f".claude/projects/{encoded}/memory/**/*.md")],

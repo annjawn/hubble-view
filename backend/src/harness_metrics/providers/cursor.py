@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .base import ProviderAdapter, UsageEvent
-from .jsonl import _project_root
+from .jsonl import _project_root, read_jsonl
 
 
 def _text_tokens(value: object) -> int:
@@ -94,10 +94,11 @@ class CursorAdapter(ProviderAdapter):
 
     def parse(self, path: Path) -> Iterable[UsageEvent]:
         try:
-            records = [json.loads(line) for line in path.read_text(encoding="utf-8", errors="replace").splitlines()]
             occurred_at = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
-        except (OSError, json.JSONDecodeError):
+        except OSError:
             return
+        numbered = read_jsonl(path)
+        records = [record for _, record in numbered]
         snapshot = self._composer_snapshot(path.stem)
         project = self._snapshot_project(snapshot) or path.parents[2].name
         model = self._snapshot_model(snapshot)
@@ -110,9 +111,7 @@ class CursorAdapter(ProviderAdapter):
 
         cumulative = 0
         previous_request = 0
-        for line_number, payload in enumerate(records):
-            if not isinstance(payload, dict):
-                continue
+        for line_number, payload in numbered:
             message = payload.get("message")
             content = message.get("content", []) if isinstance(message, dict) else []
             content_tokens = _text_tokens(content)
@@ -134,8 +133,11 @@ class CursorAdapter(ProviderAdapter):
                 occurred_at=occurred_at, session_id=path.stem, project_path=project,
                 model=model, output_tokens=output_tokens, cache_read_tokens=cache_read,
                 cache_write_tokens=cache_write, tool_calls=tool_calls,
+                # Cursor transcripts carry no per-turn time; the scanner keeps
+                # the first-seen value for events flagged this way.
                 metadata={"type": "assistant", "usage_source": "local-estimate",
-                          "estimated": True, "estimator": "cursor-context-v1"},
+                          "estimated": True, "estimator": "cursor-context-v1",
+                          "timestamp_source": "file-mtime"},
             )
             previous_request = cumulative
             cumulative += content_tokens

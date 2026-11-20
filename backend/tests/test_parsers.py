@@ -2,16 +2,18 @@ import json
 import sqlite3
 from pathlib import Path
 
-from harness_metrics.providers.jsonl import parse_common
-from harness_metrics.providers.cursor import CursorAdapter
-from harness_metrics.providers.kiro import KiroAdapter
-from harness_metrics.providers.codex import CodexAdapter
-from harness_metrics.providers.opencode import OpenCodeAdapter
 from harness_metrics.providers.antigravity import AntigravityAdapter
 from harness_metrics.providers.claude_trace import parse_claude_trace
+from harness_metrics.providers.codex import CodexAdapter
 from harness_metrics.providers.codex_trace import parse_codex_trace
+from harness_metrics.providers.cursor import CursorAdapter
+from harness_metrics.providers.jsonl import parse_common
+from harness_metrics.providers.kiro import KiroAdapter
+from harness_metrics.providers.opencode import OpenCodeAdapter
 from harness_metrics.providers.provider_traces import (
-    parse_cursor_trace, parse_kiro_trace, parse_opencode_trace,
+    parse_cursor_trace,
+    parse_kiro_trace,
+    parse_opencode_trace,
 )
 
 
@@ -332,3 +334,120 @@ def test_antigravity_decodes_generation_usage_and_project(tmp_path: Path):
     assert (event.input_tokens, event.output_tokens, event.cache_read_tokens) == (300, 75, 500)
     assert (event.tool_calls, event.duration_ms) == (1, 2000)
     assert event.metadata["reasoning_tokens"] == 25
+
+
+def test_claude_adapter_merges_request_lines_and_counts_tool_use_blocks(tmp_path: Path):
+    from harness_metrics.providers.claude import ClaudeAdapter
+
+    log = tmp_path / "session.jsonl"
+    usage = {"input_tokens": 3, "output_tokens": 157}
+    records = [
+        {"type": "assistant", "timestamp": "2026-08-31T00:00:00Z", "requestId": "request-1",
+         "message": {"model": "claude-fable", "usage": usage,
+                     "content": [{"type": "thinking", "thinking": "plan"}]}},
+        {"type": "assistant", "timestamp": "2026-08-31T00:00:01Z", "requestId": "request-1",
+         "message": {"model": "claude-fable", "usage": usage,
+                     "content": [{"type": "tool_use", "id": "tool-1", "name": "Read", "input": {}}]}},
+        {"type": "assistant", "timestamp": "2026-08-31T00:00:02Z", "requestId": "request-1",
+         "message": {"model": "claude-fable", "usage": usage,
+                     "content": [{"type": "tool_use", "id": "tool-2", "name": "Edit", "input": {}}]}},
+    ]
+    log.write_text("\n".join(json.dumps(record) for record in records))
+    events = list(ClaudeAdapter().parse(log))
+    assert len(events) == 1
+    assert (events[0].tool_calls, events[0].output_tokens) == (2, 157)
+    assert events[0].metadata["tool_use_ids"] == ["tool-1", "tool-2"]
+
+
+def test_codex_does_not_double_count_token_usage_records(tmp_path: Path):
+    log = tmp_path / "rollout-2026-08-31-abc.jsonl"
+    usage = {"input_tokens": 20, "cached_input_tokens": 5, "output_tokens": 7}
+    log.write_text("\n".join([
+        json.dumps({"type": "session_meta", "payload": {"id": "session-uuid", "cwd": str(tmp_path)}}),
+        json.dumps({"timestamp": "2026-08-31T00:00:00Z", "type": "event_msg",
+                    "payload": {"type": "token_count", "info": {"last_token_usage": usage}}}),
+        json.dumps({"timestamp": "2026-08-31T00:00:00Z", "type": "token_usage_record",
+                    "payload": {"session_id": "session-uuid", "response_id": "resp-1", "usage": usage}}),
+        json.dumps({"timestamp": "2026-08-31T00:00:01Z", "type": "response_item",
+                    "payload": {"type": "custom_tool_call", "name": "apply_patch", "call_id": "call-1"}}),
+        '{"timestamp": "2026-08-31T00:00:02Z", "type": "event_msg", "payl',
+    ]))
+    events = list(CodexAdapter().parse(log))
+    assert sum(event.input_tokens for event in events) == 15
+    assert sum(event.output_tokens for event in events) == 7
+    assert sum(event.tool_calls for event in events) == 1
+    assert {event.session_id for event in events} == {"session-uuid"}
+
+
+def test_cursor_tolerates_blank_and_partial_transcript_lines(tmp_path: Path):
+    log = tmp_path / "cursor-session.jsonl"
+    complete = json.dumps({"role": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}})
+    log.write_text(f'{complete}\n\n{{"role": "assistant", "mess')
+    assert len(list(CursorAdapter().parse(log))) == 1
+    assert len(list(parse_cursor_trace(log, {}))) == 1
+
+
+def test_claude_incremental_scan_reads_only_appended_lines_and_keeps_ids(tmp_path: Path):
+    from harness_metrics.providers.claude import ClaudeAdapter
+
+    def line(index: int, request: str, tool: str | None = None) -> str:
+        content = [{"type": "tool_use", "id": tool, "name": "Read", "input": {}}] if tool else [{"type": "text", "text": "hi"}]
+        return json.dumps({
+            "type": "assistant", "uuid": f"uuid-{index}", "timestamp": f"2026-08-31T00:00:0{index}Z",
+            "requestId": request, "message": {"role": "assistant", "model": "claude-fable", "content": content,
+                                               "usage": {"input_tokens": 1, "output_tokens": 5}},
+        })
+
+    log = tmp_path / "session.jsonl"
+    adapter = ClaudeAdapter()
+    log.write_text(line(0, "r1", "tool-1") + "\n" + line(1, "r1", "tool-2")[:40])  # second line still being written
+    usage, trace, state = adapter.scan_source(log, {})
+    assert [event.metadata["tool_use_ids"] for event in usage] == [["tool-1"]]
+    assert len(trace) == 1 and state["line"] == 1
+
+    log.write_text(line(0, "r1", "tool-1") + "\n" + line(1, "r1", "tool-2") + "\n" + line(2, "r2") + "\n")
+    usage, trace, state = adapter.scan_source(log, state)
+    assert [event.metadata.get("tool_use_ids") for event in usage] == [["tool-2"], None]
+    assert len(trace) == 2 and state["offset"] == log.stat().st_size
+
+    full_usage = {event.id for event in adapter.parse(log)}
+    assert {event.id for event in usage} <= full_usage
+    assert {event["id"] for event in trace} <= {event["id"] for event in parse_claude_trace(log)}
+    assert adapter.scan_source(log, state)[:2] == ([], [])
+    log.write_text(line(3, "r3") + "\n")  # rewritten shorter: start over
+    assert len(adapter.scan_source(log, state)[0]) == 1
+
+
+def test_opencode_watermark_reads_only_rows_updated_since_last_scan(tmp_path: Path, monkeypatch):
+    database = tmp_path / "opencode.db"
+    monkeypatch.setenv("OPENCODE_DB", str(database))
+    connection = sqlite3.connect(database)
+    connection.executescript("""
+        CREATE TABLE session(id TEXT PRIMARY KEY, directory TEXT);
+        CREATE TABLE message(id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT);
+        CREATE TABLE part(id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT);
+    """)
+    connection.execute("INSERT INTO session VALUES ('s1', ?)", (str(tmp_path),))
+    message = json.dumps({"role": "assistant", "modelID": "test", "tokens": {"input": 3, "output": 4}})
+    connection.execute("INSERT INTO message VALUES ('m1','s1',1000,1000,?)", (message,))
+    connection.execute("INSERT INTO message VALUES ('m0','s1',500,500,?)", (message,))
+    connection.execute("INSERT INTO part VALUES ('p0','m0','s1',500,500,?)", (json.dumps({"type": "text", "text": "zero"}),))
+    connection.execute("INSERT INTO part VALUES ('p1','m1','s1',1000,1000,?)", (json.dumps({"type": "text", "text": "one"}),))
+    connection.commit()
+    adapter = OpenCodeAdapter()
+    usage, trace, state = adapter.scan_source(database, {})
+    assert (len(usage), len(trace), state) == (2, 2, {"watermark": 1000})
+    connection.execute("INSERT INTO message VALUES ('m2','s1',2000,2000,?)", (message,))
+    connection.execute("INSERT INTO part VALUES ('p2','m2','s1',2000,2000,?)", (json.dumps({"type": "text", "text": "two"}),))
+    connection.commit(); connection.close()
+    usage, trace, state = adapter.scan_source(database, state)
+    # Rows at the watermark are re-read (idempotent upserts); older rows are not.
+    assert [event["content"] for event in trace] == ["one", "two"]
+    assert (len(usage), state) == (2, {"watermark": 2000})
+
+
+def test_cursor_events_are_flagged_so_first_seen_time_is_kept(tmp_path: Path):
+    log = tmp_path / "cursor-session.jsonl"
+    log.write_text(json.dumps({"role": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}}))
+    assert list(CursorAdapter().parse(log))[0].metadata["timestamp_source"] == "file-mtime"
+    assert list(parse_cursor_trace(log, {}))[0]["metadata"]["timestamp_source"] == "file-mtime"

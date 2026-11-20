@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     scan_interval_seconds: int = 30
     host: str = "127.0.0.1"
     port: int = 8765
+    # Optional shared secret (HARNESS_METRICS_API_TOKEN). Electron generates one
+    # per launch; when unset (manual development) the API is unauthenticated.
+    api_token: str | None = None
     model_config = SettingsConfigDict(env_prefix="HARNESS_METRICS_")
 
     @property

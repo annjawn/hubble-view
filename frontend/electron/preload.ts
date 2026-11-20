@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('desktop', {
   platform: process.platform,
   getApiBaseUrl: () => ipcRenderer.invoke('startup:apiBaseUrl'),
+  getApiToken: () => ipcRenderer.invoke('startup:apiToken'),
   getStartupStatus: () => ipcRenderer.invoke('startup:status'),
   retryStartup: () => ipcRenderer.invoke('startup:retry'),
   openDiagnostics: () => ipcRenderer.invoke('startup:openDiagnostics'),

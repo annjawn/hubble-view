@@ -7,6 +7,7 @@ declare global {
     desktop?: {
       platform: string
       getApiBaseUrl: () => Promise<string>
+      getApiToken: () => Promise<string>
       getStartupStatus: () => Promise<StartupStatus>
       retryStartup: () => Promise<StartupStatus>
       openDiagnostics: () => Promise<string>

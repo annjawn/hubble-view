@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from .jsonl import read_jsonl
+
 
 def _tokens(usage: object, key: str) -> int:
     return int(usage.get(key, 0) or 0) if isinstance(usage, dict) else 0
@@ -18,23 +20,17 @@ def _text(value: object) -> str | None:
     return None
 
 
-def parse_claude_trace(path: Path, project_hint: str | None = None) -> Iterable[dict[str, Any]]:
+def parse_claude_trace(
+    path: Path, project_hint: str | None = None,
+    records: list[tuple[int, dict[str, Any]]] | None = None,
+) -> Iterable[dict[str, Any]]:
     """Normalize human-visible Claude transcript and tool events.
 
     IDs use the persisted message/block identity where available so rescanning a
-    growing transcript is idempotent.
+    growing transcript is idempotent. ``records`` supplies an already-read slice
+    of the file for incremental scans.
     """
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return
-    for line_number, line in enumerate(lines):
-        try:
-            payload = json.loads(line)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if not isinstance(payload, dict):
-            continue
+    for line_number, payload in (read_jsonl(path) if records is None else records):
         message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
         role = message.get("role") or (payload.get("type") if payload.get("type") in {"user", "assistant"} else None)
         content = message.get("content")
